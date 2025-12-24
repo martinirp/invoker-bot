@@ -56,23 +56,43 @@ function startCacheMonitor() {
 
         // pular se estiver tocando agora em alguma guild
         if (anyGuildPlayingVideo(s.videoId)) continue;
-
-        if (!fs.existsSync(abs)) {
-          broken++;
-          if (fix) {
-            try { removeSongCompletely(s.videoId); removed++; } catch {}
+        // Skip files that are actively being written (.part) or were modified recently
+        const partFile = `${abs}.part`;
+        try {
+          if (fs.existsSync(partFile)) {
+            // file still being written
+            continue;
           }
+
+          if (!fs.existsSync(abs)) {
+            broken++;
+            if (fix) {
+              try { removeSongCompletely(s.videoId); removed++; } catch (e) {}
+            }
+            continue;
+          }
+
+          // If file was modified very recently, skip this tick to avoid race with writers
+          const stats = fs.statSync(abs);
+          const ageMs = Date.now() - stats.mtimeMs;
+          const minAgeMs = 15_000; // 15s
+          if (ageMs < minAgeMs) {
+            continue;
+          }
+
+          const valid = isValidOggOpus(abs);
+          if (!valid) {
+            broken++;
+            if (fix) {
+              try { removeSongCompletely(s.videoId); removed++; } catch (e) {}
+            }
+          }
+          checked++;
+        } catch (err) {
+          console.error('[CACHE MONITOR] erro ao verificar arquivo:', abs, err && err.message);
+          // do not aggressively remove on unexpected errors
           continue;
         }
-
-        const valid = isValidOggOpus(abs);
-        if (!valid) {
-          broken++;
-          if (fix) {
-            try { removeSongCompletely(s.videoId); removed++; } catch {}
-          }
-        }
-        checked++;
       }
 
       console.log(`[CACHE MONITOR] verificados=${checked} quebrados=${broken} removidos=${removed} (idx ${idx}-${end}/${songs.length})`);
