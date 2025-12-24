@@ -11,7 +11,7 @@ export interface SongLike {
 
 export function createEmbed(): EmbedBuilder {
   return new EmbedBuilder()
-    .setColor(0x5865f2)
+    .setColor(0x5dade2)
     .setTimestamp()
     .setFooter({ text: 'Music Bot' });
 }
@@ -45,9 +45,9 @@ export function createSongEmbed(
 ): EmbedBuilder {
   const embed = createEmbed();
 
-  // Cor dourada quando loop ativo, cinza quando inativo
+  // Cor dourada quando loop ativo, azul claro padrão
   if (status === 'playing') {
-    embed.setColor(loop ? 0xFFD700 : 0x808080); // Gold vs Gray
+    embed.setColor(loop ? 0xFFD700 : 0x5dade2); // Gold vs Light Blue
   }
 
   const statusEmoji: Record<SongStatus, string> = {
