@@ -40,10 +40,61 @@ async function execute(message) {
 
   try {
     // =====================================================
-    // 🎵 SPOTIFY LINK (busca no YouTube via metadata)
+    // 🎵 SPOTIFY LINK (track OR playlist)
     // =====================================================
     if (isSpotifyLink(query)) {
-      console.log('[PLAY] Detectado link Spotify, resolvendo metadata...');
+      // detectar playlist (spotify playlist url ou spotify:playlist:)
+      const isPl = /playlist[/:]/.test(query) || /spotify:playlist:/.test(query);
+
+      if (isPl) {
+        console.log('[PLAY] Detectado playlist Spotify, resolvendo faixas...');
+        const { getSpotifyPlaylist } = require('../utils/getSpotifyPL');
+        const { processPlaylistBatched } = require('../utils/playlistProcessor');
+
+        const tracks = await getSpotifyPlaylist(query);
+        if (!tracks || tracks.length === 0) {
+          throw new Error('Não foi possível obter faixas da playlist Spotify.');
+        }
+
+        // Perguntar ao usuário se deseja adicionar a playlist
+        const askMsg = await textChannel.send({
+          embeds: [createEmbed().setTitle('📜 Playlist Spotify detectada').setDescription(`Deseja adicionar **${tracks.length}** músicas desta playlist à fila?`)],
+          components: [{ type: 1, components: [ { type: 2, style: 3, label: 'Sim', custom_id: 'sp_yes' }, { type: 2, style: 4, label: 'Não', custom_id: 'sp_no' } ] }]
+        });
+
+        const filter = i => i.user.id === message.author.id;
+        const collector = askMsg.createMessageComponentCollector({ filter, max: 1, time: 60000 });
+
+        collector.on('collect', async i => {
+          if (i.deferred || i.replied) return;
+          await i.deferUpdate();
+
+          if (i.customId === 'sp_yes') {
+            // resolver cada faixa para um vídeo do YouTube (em lotes) e processar
+            const videos = [];
+            for (const t of tracks) {
+              try {
+                const res = await resolve(t.query);
+                if (res && res.videoId) {
+                  videos.push({ videoId: res.videoId, title: res.title || t.query });
+                }
+              } catch (e) {
+                console.error('[PLAY][SPOTIFY-PL] erro ao resolver:', t.query, e.message);
+              }
+            }
+
+            if (videos.length > 0) {
+              await processPlaylistBatched({ playlist: { videos }, guildId, voiceChannel, textChannel, limit: videos.length, batchSize: 10 });
+            }
+          }
+
+          askMsg.edit({ components: [] }).catch(() => {});
+        });
+
+        return;
+      }
+
+      console.log('[PLAY] Detectado link Spotify (track), resolvendo metadata...');
 
       const spotifyData = await resolveSpotifyTrack(query);
       
