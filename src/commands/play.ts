@@ -1,6 +1,7 @@
 // @ts-nocheck
 const { createEmbed } = require('../utils/embed');
 const { resolve } = require('../utils/resolver');
+const { fastResolve } = require('../utils/fastResolver');
 const queueManager = require('../utils/queueManager');
 const db = require('../utils/db');
 

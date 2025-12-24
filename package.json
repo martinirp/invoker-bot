@@ -8,6 +8,8 @@
     "dev": "ts-node src/start.ts",
     "build": "tsc -b",
     "start": "node --enable-source-maps --max-old-space-size=2048 dist/start.js",
+    "warmup": "ts-node scripts/quickWarmup.ts",
+    "warmup:ai": "ts-node scripts/warmupCache.ts",
     "lint": "echo 'no lint configured'"
   },
   "engines": {
