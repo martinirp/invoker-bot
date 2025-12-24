@@ -2,13 +2,13 @@
 const db = require('./db');
 
 // In-memory cache para resolução rápida (YouTube → videoId)
-const memCache = new Map(); // { query: { videoId, title, timestamp } }
-const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+// Mantém indefinidamente enquanto arquivo estiver em cache (sem TTL)
+const memCache = new Map(); // { query: { videoId, title } }
 
 async function resolveWithCache(query, resolver) {
-  // 1️⃣ Check mem cache
+  // 1️⃣ Check mem cache (sem expiração)
   const cached = memCache.get(query);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+  if (cached) {
     console.log(`[CACHE-RESOLVE] HIT (mem): ${query} → ${cached.videoId}`);
     return cached;
   }
@@ -18,7 +18,7 @@ async function resolveWithCache(query, resolver) {
   if (dbEntry) {
     const song = db.getByVideoId(dbEntry.videoId);
     if (song) {
-      memCache.set(query, { videoId: song.videoId, title: song.title, timestamp: Date.now() });
+      memCache.set(query, { videoId: song.videoId, title: song.title });
       console.log(`[CACHE-RESOLVE] HIT (db): ${query} → ${song.videoId}`);
       return { videoId: song.videoId, title: song.title };
     }
@@ -31,7 +31,7 @@ async function resolveWithCache(query, resolver) {
     try {
       const result = await resolver(query);
       if (result && result.videoId) {
-        memCache.set(query, { ...result, timestamp: Date.now() });
+        memCache.set(query, { videoId: result.videoId, title: result.title });
         console.log(`[CACHE-RESOLVE] MISS → RESOLVED (attempt ${attempt + 1}): ${query} → ${result.videoId}`);
         return result;
       }
@@ -70,19 +70,5 @@ async function resolveParallel(queries, resolver, concurrency = 5) {
 
   return { results, errors };
 }
-
-// Clear old cache entries
-function clearOldCache() {
-  const now = Date.now();
-  for (const [key, val] of memCache.entries()) {
-    if (now - val.timestamp > CACHE_TTL_MS) {
-      memCache.delete(key);
-    }
-  }
-  console.log(`[CACHE-RESOLVE] Cleared old entries, current size: ${memCache.size}`);
-}
-
-// Periodically clean cache
-setInterval(clearOldCache, 6 * 60 * 60 * 1000); // every 6 hours
 
 module.exports = { resolveWithCache, resolveParallel };
