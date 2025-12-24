@@ -4,6 +4,7 @@ const queueManager = require('../utils/queueManager');
 const dibuiador = require('../utils/dibuiador');
 const downloadManager = require('../utils/download');
 const { getSpotifyPlaylist } = require('../utils/getSpotifyPL');
+const { searchWithCache, batchSearch } = require('../utils/searchCache');
 const https = require('https');
 const { joinVoiceChannel } = require('@discordjs/voice');
 
@@ -119,52 +120,17 @@ module.exports = {
                 }]
             });
 
-            let adicionadas = 0;
-            let falhas = 0;
-            
-            for (const nomeMusica of recomendadas) {
-                try {
-                    const resultado = await dibuiador.buscarMusica(nomeMusica);
-                    if (resultado) {
-                        const downloadResult = await downloadManager.downloadSong(
-                            resultado.url,
-                            resultado.videoId,
-                            resultado.title
-                        );
-
-                        if (downloadResult.success) {
-                            await queueManager.addToQueue(guildId, {
-                                url: resultado.url,
-                                title: resultado.title,
-                                videoId: resultado.videoId,
-                                requestedBy: message.author.tag,
-                                channel: message.channel,
-                                fromCache: downloadResult.fromCache,
-                                file: downloadResult.file
-                            }, voiceChannel);
-                            adicionadas++;
-                            log(`✅ + ${nomeMusica}`);
-                        } else {
-                            log(`❌ Falha no download: ${nomeMusica}`);
-                            falhas++;
-                        }
-                    } else {
-                        log(`❌ Não encontrada: ${nomeMusica}`);
-                        falhas++;
-                    }
-                } catch (err) {
-                    log(`❌ Erro ao adicionar "${nomeMusica}": ${err.message}`);
-                    falhas++;
-                }
-                await new Promise(res => setTimeout(res, 500));
-            }
-
-            let resultadoMsg = `✅ | **Mix completo!** ${adicionadas} músicas adicionadas (via ${fonte})`;
-            if (falhas > 0) {
-                resultadoMsg += `\n⚠️ | ${falhas} músicas não puderam ser adicionadas`;
-            }
-            
-            message.channel.send(resultadoMsg);
+            // 🚀 LAZY LOAD: Começa a processar em background enquanto retorna ao usuário
+            // Não precisa await aqui - processamento acontece de forma assíncrona
+            processRecommendationsInBackground(
+              guildId,
+              recomendadas,
+              voiceChannel,
+              message,
+              dibuiador,
+              downloadManager,
+              queueManager
+            );
 
         } catch (error) {
             console.error(`❌ [MIX] Erro geral:`, error);
@@ -172,6 +138,88 @@ module.exports = {
         }
     },
 };
+
+// 🔄 Processamento em Background com Lazy Load
+async function processRecommendationsInBackground(
+    guildId,
+    recomendadas,
+    voiceChannel,
+    message,
+    dibuiador,
+    downloadManager,
+    queueManager
+) {
+    log(`🚀 [LAZY-LOAD] Iniciando processamento de ${recomendadas.length} músicas em background`);
+
+    let adicionadas = 0;
+    let falhas = 0;
+
+    // Fazer batch search com cache (paralizado em lotes)
+    const { results } = await batchSearch(
+        recomendadas,
+        q => dibuiador.buscarMusica(q),
+        5 // concurrency: 5 músicas por vez
+    );
+
+    // Processar resultados e baixar em paralelo (máx 4 simultâneos)
+    const downloadBatches = 4;
+    for (let i = 0; i < results.length; i += downloadBatches) {
+        const batch = results.slice(i, i + downloadBatches).filter(r => r !== null);
+
+        const downloadPromises = batch.map(async (resultado) => {
+            try {
+                const downloadResult = await downloadManager.downloadSong(
+                    resultado.url,
+                    resultado.videoId,
+                    resultado.title
+                );
+
+                if (downloadResult.success) {
+                    await queueManager.addToQueue(
+                        guildId,
+                        {
+                            url: resultado.url,
+                            title: resultado.title,
+                            videoId: resultado.videoId,
+                            requestedBy: message.author.tag,
+                            channel: message.channel,
+                            fromCache: downloadResult.fromCache,
+                            file: downloadResult.file
+                        },
+                        voiceChannel
+                    );
+                    adicionadas++;
+                    log(`✅ + ${resultado.title}`);
+                    return true;
+                } else {
+                    log(`❌ Falha no download: ${resultado.title}`);
+                    falhas++;
+                    return false;
+                }
+            } catch (err) {
+                log(`❌ Erro ao adicionar "${resultado.title}": ${err.message}`);
+                falhas++;
+                return false;
+            }
+        });
+
+        await Promise.allSettled(downloadPromises);
+    }
+
+    // Notificar usuário do progresso
+    let resultadoMsg = `✅ | **Mix background completo!** ${adicionadas} músicas adicionadas`;
+    if (falhas > 0) {
+        resultadoMsg += `\n⚠️ | ${falhas} músicas não puderam ser adicionadas`;
+    }
+
+    try {
+        await message.channel.send(resultadoMsg);
+    } catch (err) {
+        log(`⚠️ Não conseguiu enviar mensagem de conclusão:`, err.message);
+    }
+
+    log(`✅ [LAZY-LOAD] Background processing completo (${adicionadas}/${recomendadas.length})`);
+}
 
 async function getMixFromGemini(musicaBase) {
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
