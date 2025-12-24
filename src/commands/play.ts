@@ -47,49 +47,67 @@ async function execute(message) {
       const isPl = /playlist[/:]/.test(query) || /spotify:playlist:/.test(query);
 
       if (isPl) {
-        console.log('[PLAY] Detectado playlist Spotify, resolvendo faixas...');
+        console.log('[PLAY] Detectado playlist Spotify, obtendo faixas...');
         const { getSpotifyPlaylist } = require('../utils/getSpotifyPL');
-        const { processPlaylistBatched } = require('../utils/playlistProcessor');
+        const { resolveWithCache, resolveParallel } = require('../utils/resolutionCache');
 
         const tracks = await getSpotifyPlaylist(query);
         if (!tracks || tracks.length === 0) {
           throw new Error('Não foi possível obter faixas da playlist Spotify.');
         }
 
-        // Perguntar ao usuário se deseja adicionar a playlist
-        const askMsg = await textChannel.send({
-          embeds: [createEmbed().setTitle('📜 Playlist Spotify detectada').setDescription(`Deseja adicionar **${tracks.length}** músicas desta playlist à fila?`)],
-          components: [{ type: 1, components: [ { type: 2, style: 3, label: 'Sim', custom_id: 'sp_yes' }, { type: 2, style: 4, label: 'Não', custom_id: 'sp_no' } ] }]
+        // Tocar a primeira faixa IMEDIATAMENTE
+        console.log(`[PLAY][SPOTIFY-PL] Resolvendo primeira faixa: "${tracks[0].query}"`);
+        const firstRes = await resolveWithCache(tracks[0].query, resolve);
+        const firstSong = firstRes && firstRes.videoId 
+          ? { videoId: firstRes.videoId, title: firstRes.title || tracks[0].query }
+          : null;
+
+        if (!firstSong) {
+          throw new Error('Não foi possível resolver a primeira faixa da playlist.');
+        }
+
+        await queueManager.play(guildId, voiceChannel, firstSong, textChannel);
+
+        await statusMsg.edit({
+          embeds: [
+            createEmbed()
+              .setDescription(`✅ Spotify Playlist: **${firstSong.title}** (1/${tracks.length})\n🔄 Resolvendo próximas (paralelo)...`)
+          ]
         });
 
-        const filter = i => i.user.id === message.author.id;
-        const collector = askMsg.createMessageComponentCollector({ filter, max: 1, time: 60000 });
+        // Resolver resto em PARALELO em background (sem bloquear)
+        if (tracks.length > 1) {
+          console.log(`[PLAY][SPOTIFY-PL] Enfileirando ${tracks.length - 1} faixas restantes (paralelo) em background...`);
+          
+          (async () => {
+            const remaining = tracks.slice(1);
+            const queries = remaining.map(t => t.query);
+            
+            const { results, errors } = await resolveParallel(queries, resolve, 10); // 10 concurrent
 
-        collector.on('collect', async i => {
-          if (i.deferred || i.replied) return;
-          await i.deferUpdate();
-
-          if (i.customId === 'sp_yes') {
-            // resolver cada faixa para um vídeo do YouTube (em lotes) e processar
-            const videos = [];
-            for (const t of tracks) {
+            let added = 0;
+            for (const video of results) {
+              if (!video || !video.videoId) continue;
               try {
-                const res = await resolve(t.query);
-                if (res && res.videoId) {
-                  videos.push({ videoId: res.videoId, title: res.title || t.query });
-                }
+                await queueManager.play(guildId, voiceChannel, video, null);
+                added++;
               } catch (e) {
-                console.error('[PLAY][SPOTIFY-PL] erro ao resolver:', t.query, e.message);
+                console.error('[PLAY][SPOTIFY-PL] erro ao enfileirar:', e.message);
               }
             }
 
-            if (videos.length > 0) {
-              await processPlaylistBatched({ playlist: { videos }, guildId, voiceChannel, textChannel, limit: videos.length, batchSize: 10 });
+            console.log(`[PLAY][SPOTIFY-PL] Concluído: ${added}/${remaining.length} faixas adicionadas (${errors.length} erros)`);
+            if (textChannel) {
+              textChannel.send({
+                embeds: [
+                  createEmbed()
+                    .setDescription(`✅ Playlist Spotify completa: **${added}** faixas adicionadas à fila.${errors.length > 0 ? ` ⚠️ ${errors.length} não conseguidas.` : ''}`)
+                ]
+              }).catch(() => {});
             }
-          }
-
-          askMsg.edit({ components: [] }).catch(() => {});
-        });
+          })();
+        }
 
         return;
       }

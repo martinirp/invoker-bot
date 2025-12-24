@@ -45,6 +45,11 @@ export function createSongEmbed(
 ): EmbedBuilder {
   const embed = createEmbed();
 
+  // Cor dourada quando loop ativo, cinza quando inativo
+  if (status === 'playing') {
+    embed.setColor(loop ? 0xFFD700 : 0x808080); // Gold vs Gray
+  }
+
   const statusEmoji: Record<SongStatus, string> = {
     playing: '▶️ Tocando agora',
     queued: '📝 Adicionado à fila',
@@ -64,8 +69,8 @@ export function createSongEmbed(
   }
 
   if (status === 'playing') {
-    embed.addFields({ name: '🔁 Loop', value: loop ? 'Ativado' : 'Desativado', inline: true });
-    embed.addFields({ name: '🎧 Auto', value: autoDJ ? 'Ativado' : 'Desativado', inline: true });
+    embed.addFields({ name: '🔁 Loop', value: loop ? '✅ Ativado' : '❌ Desativado', inline: true });
+    embed.addFields({ name: '🎧 Auto', value: autoDJ ? '✅ Ativado' : '❌ Desativado', inline: true });
   }
 
   if (song.videoId) {
