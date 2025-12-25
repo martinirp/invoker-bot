@@ -1,6 +1,10 @@
 # Dependencies
 node_modules/
+<<<<<<< HEAD
 
+=======
+package-lock.json
+>>>>>>> 7969a3508c48cc32fbf2553286f13cd3bcc319a1
 
 # Environment variables
 .env

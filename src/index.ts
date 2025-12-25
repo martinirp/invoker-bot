@@ -505,11 +505,65 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         // Só processa se for a mensagem da fila
         if (!g || !g.queueMessage || message.id !== g.queueMessage.id) return;
         if (g.queue.length === 0) return;
+        // Helper para formatar duração (duplicado de queue.ts para simplificar scope)
+        const durationToSeconds = (duration) => {
+          if (!duration) return 0;
+          const parts = duration.split(':').map(Number);
+          if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+          else if (parts.length === 2) return parts[0] * 60 + parts[1];
+          return 0;
+        };
+        const secondsToDuration = (seconds) => {
+          const hours = Math.floor(seconds / 3600);
+          const minutes = Math.floor((seconds % 3600) / 60);
+          const secs = seconds % 60;
+          return hours > 0
+             ? `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+             : `${minutes}:${secs.toString().padStart(2, '0')}`;
+        };
+
         let idx = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟'].indexOf(reaction.emoji.name);
         if (idx >= 0 && idx < g.queue.length) {
           const removed = g.queue.splice(idx, 1)[0];
           try { await reaction.users.remove(user.id); } catch {}
-          await message.channel.send({ embeds: [createEmbed().setDescription(`🗑️ Removida: **${removed.title}**`)] });
+          
+          // RECONSTRUIR EMBED ATUALIZADO
+          const queueSlice = g.queue.slice(0, 10);
+          const durations = await Promise.all(queueSlice.map(async song => {
+              if (song.duration) return song.duration;
+              if (song.metadata?.duration) return song.metadata.duration;
+              // Não buscar na API aqui para ser rápido na interação UI
+              return null;
+          }));
+
+          let accumulatedSeconds = 0;
+          const list = queueSlice.map((s, i) => {
+              const duration = durations[i];
+              const durationSeconds = durationToSeconds(duration);
+              const timeUntil = accumulatedSeconds > 0 ? ` • Em ${secondsToDuration(accumulatedSeconds)}` : '';
+              const durationDisplay = duration ? ` [${duration}]` : '';
+              accumulatedSeconds += durationSeconds;
+              return `${i + 1}. ${s.title}${durationDisplay}${timeUntil}`;
+          }).join('\n');
+
+          const totalDuration = accumulatedSeconds > 0 ? ` • Tempo total: ${secondsToDuration(accumulatedSeconds)}` : '';
+
+          const updatedEmbed = createEmbed().setTitle('🎶 Fila de reprodução');
+          if (g.playing && g.current) {
+               updatedEmbed.addFields({ name: '🎵 Tocando agora', value: `**${g.current.title}**` });
+          }
+          if (list) {
+              updatedEmbed.addFields({ name: `📜 Próximas músicas${totalDuration}`, value: list });
+          } else {
+               updatedEmbed.setDescription('A fila está vazia.');
+          }
+           
+          // Footer
+          if (g.queue.length > 10) {
+               updatedEmbed.setFooter({ text: `+ ${g.queue.length - 10} música(s) na fila` });
+          }
+
+          try { await message.edit({ embeds: [updatedEmbed] }); } catch {}
         }
         if (reaction.emoji.name === '❌') {
           try { await message.delete(); } catch {}
