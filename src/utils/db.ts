@@ -1,9 +1,20 @@
+/**
+ * Atualiza metadados de uma música pelo videoId.
+ * @param {string} videoId
+ * @param {object} meta - { title, artist, track }
+ */
+function updateSongMeta(videoId, meta) {
+  db.prepare(`
+    UPDATE songs SET title = ?, artist = ?, track = ? WHERE videoId = ?
+  `).run(meta.title || null, meta.artist || null, meta.track || null, videoId);
+}
 // @ts-nocheck
 const Database = require('better-sqlite3');
 const path = require('path');
 
 const dbPath = path.join(__dirname, 'music.db');
 const db = new Database(dbPath);
+db.pragma('journal_mode = WAL');
 
 // =========================
 // 🔧 NORMALIZAÇÃO
@@ -147,7 +158,8 @@ module.exports = {
   searchSongs,
   deleteSong,
   clearSearchKeys,
-  updateSongFile
+  updateSongFile,
+  updateSongMeta
 };
 
 
