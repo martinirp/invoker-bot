@@ -31,6 +31,8 @@ async function upgradeAll() {
 
   for (const [idx, song] of songs.entries()) {
     // Loga sempre qual música está sendo processada
+    // ...existing code...
+  }
     const videoId = song.videoId;
     let ytMeta = null;
     try {
