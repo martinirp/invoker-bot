@@ -1,7 +1,7 @@
-// @ts-nocheck
-const { createEmbed } = require('../utils/embed');
-const queueManager = require('../utils/queueManager');
-const { getVideoDetails } = require('../utils/youtubeApi');
+import { Message, TextChannel } from 'discord.js';
+import { createEmbed } from '../utils/embed';
+import queueManager from '../utils/queueManager';
+import { getVideoDetails } from '../utils/youtubeApi';
 
 /**
  * Converte duração em formato legível (HH:MM:SS ou MM:SS) para segundos
@@ -32,11 +32,25 @@ function secondsToDuration(seconds) {
   return `${minutes}:${secs.toString().padStart(2, '0')}`;
 }
 
-async function execute(message) {
-  const guildId = message.guild.id;
-  const textChannel = message.channel;
+type Song = {
+  title: string;
+  duration?: string;
+  metadata?: { duration?: string };
+  videoId?: string;
+};
 
-  const g = queueManager.guilds.get(guildId);
+type GuildQueue = {
+  playing: boolean;
+  current?: Song;
+  queue: Song[];
+  queueMessage?: Message;
+};
+
+async function execute(message: Message) {
+  const guildId = message.guild.id;
+  const textChannel = message.channel as TextChannel;
+
+  const g = queueManager.guilds.get(guildId) as GuildQueue | undefined;
 
   if (!g || (!g.playing && g.queue.length === 0)) {
     return textChannel.send({
@@ -106,7 +120,7 @@ async function execute(message) {
   // Adiciona reações de remoção na mensagem da fila e salva referência
   const EMOJIS = ['❌','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟'];
   try {
-    for (let i = 0; i <= Math.min(10, g.queue.length); i++) {
+    for (let i = 0; i < Math.min(EMOJIS.length, g.queue.length + 1); i++) {
       await sent.react(EMOJIS[i]);
     }
     // Salva referência da mensagem da fila para identificar no handler
@@ -182,7 +196,7 @@ async function execute(message) {
   return sent;
 }
 
-module.exports = {
+export = {
   name: 'queue',
   aliases: ['q', 'fila'],
   description: 'Mostra a fila de reprodução com duração e tempo até tocar',
