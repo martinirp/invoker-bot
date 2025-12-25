@@ -1,3 +1,37 @@
+// ===============================================
+// 🐛 DEBUG EMBED
+// ===============================================
+function sendDebugEmbed(guildId, msg) {
+  if (process.env.DISCORD_DEBUG !== 'true') return;
+  const textChannel = lastTextChannel.get(guildId);
+  if (!textChannel) return;
+  textChannel.send({ embeds: [createEmbed().setTitle('Debug').setDescription('```' + msg + '```')] }).catch(() => {});
+}
+
+const originalLog = console.log;
+const originalWarn = console.warn;
+const originalError = console.error;
+console.log = function (...args) {
+  originalLog.apply(console, args);
+  try {
+    const guildId = global.lastDebugGuildId;
+    if (guildId) sendDebugEmbed(guildId, args.map(String).join(' '));
+  } catch {}
+};
+console.warn = function (...args) {
+  originalWarn.apply(console, args);
+  try {
+    const guildId = global.lastDebugGuildId;
+    if (guildId) sendDebugEmbed(guildId, args.map(String).join(' '));
+  } catch {}
+};
+console.error = function (...args) {
+  originalError.apply(console, args);
+  try {
+    const guildId = global.lastDebugGuildId;
+    if (guildId) sendDebugEmbed(guildId, args.map(String).join(' '));
+  } catch {}
+};
 // @ts-nocheck
 // ===============================================
 // 🚫 EVITAR MULTI INSTÂNCIAS
@@ -182,6 +216,7 @@ client.on(Events.MessageCreate, async message => {
   if (message.author.bot) return;
 
   lastTextChannel.set(message.guild.id, message.channel);
+  global.lastDebugGuildId = message.guild.id;
 
   const prefix = PREFIXES.find(p => message.content.startsWith(p));
   if (!prefix) return;
