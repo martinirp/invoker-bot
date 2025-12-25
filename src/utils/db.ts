@@ -39,7 +39,8 @@ db.prepare(`
     artist TEXT,
     track TEXT,
     file TEXT,
-    createdAt INTEGER
+    createdAt INTEGER,
+    updated INTEGER DEFAULT 0
   )
 `).run();
 
@@ -76,6 +77,23 @@ function insertKey(key, videoId) {
 
 // =========================
 // UPDATE
+/**
+ * Marca uma música como processada (updated = 1).
+ * @param {string} videoId
+ */
+function markSongUpdated(videoId) {
+  db.prepare(`UPDATE songs SET updated = 1 WHERE videoId = ?`).run(videoId);
+}
+
+/**
+ * Verifica se uma música já foi processada (updated = 1).
+ * @param {string} videoId
+ * @returns {boolean}
+ */
+function isSongUpdated(videoId) {
+  const row = db.prepare(`SELECT updated FROM songs WHERE videoId = ?`).get(videoId);
+  return !!(row && row.updated);
+}
 // =========================
 /**
  * Atualiza o caminho do arquivo de áudio para um vídeo específico.
@@ -159,7 +177,9 @@ module.exports = {
   deleteSong,
   clearSearchKeys,
   updateSongFile,
-  updateSongMeta
+  updateSongMeta,
+  markSongUpdated,
+  isSongUpdated
 };
 
 

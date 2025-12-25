@@ -47,6 +47,10 @@ async function upgradeAll() {
 
     // Se não existe arquivo 128kbps e não está tocando, faz upgrade
     if (fs.existsSync(file64) && !fs.existsSync(file128) && !isPlaying) {
+      // Pula se já foi processada
+      if (db.isSongUpdated(videoId)) {
+        continue;
+      }
       try {
         console.log(`Baixando versão 128kbps para ${videoId} - ${title}...`);
         await downloadAudio(videoId, 128, file128);
@@ -127,3 +131,5 @@ async function upgradeAll() {
 
 // Para rodar em background, basta chamar upgradeAll() de forma assíncrona no start.ts
 upgradeAll();
+    // Marca como processada no banco
+    db.markSongUpdated(videoId);
