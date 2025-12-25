@@ -64,6 +64,20 @@ function insertKey(key, videoId) {
 }
 
 // =========================
+// UPDATE
+// =========================
+/**
+ * Atualiza o caminho do arquivo de áudio para um vídeo específico.
+ * @param {string} videoId - ID do vídeo
+ * @param {string} file - Caminho do arquivo de áudio
+ */
+function updateSongFile(videoId, file) {
+  db.prepare(`
+    UPDATE songs SET file = ? WHERE videoId = ?
+  `).run(file, videoId);
+}
+
+// =========================
 // QUERIES
 // =========================
 function findByKey(key) {
@@ -129,10 +143,11 @@ module.exports = {
   findByKey,
   getByVideoId,
   getAllSongs,
-  getKeysByVideoId, // NOVA FUNÇÃO ADICIONADA
+  getKeysByVideoId,
   searchSongs,
   deleteSong,
-  clearSearchKeys
+  clearSearchKeys,
+  updateSongFile
 };
 
 
