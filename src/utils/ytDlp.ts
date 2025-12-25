@@ -34,5 +34,22 @@ async function runYtDlpJson(args, options = {}) {
   return JSON.parse(stdout);
 }
 
-module.exports = { runYtDlp, runYtDlpJson };
+
+/**
+ * Baixa o áudio de um vídeo do YouTube com bitrate especificado usando yt-dlp.
+ * @param {string} videoId - ID do vídeo do YouTube
+ * @param {number} bitrate - Bitrate desejado (ex: 128)
+ * @param {string} outputPath - Caminho do arquivo de saída
+ * @returns {Promise<void>}
+ */
+async function downloadAudio(videoId, bitrate, outputPath) {
+  // Exemplo: yt-dlp -f "bestaudio[abr<=128]" -o outputPath https://youtube.com/watch?v=videoId
+  const url = `https://youtube.com/watch?v=${videoId}`;
+  // O filtro de bitrate depende dos formatos disponíveis, mas abr<=bitrate cobre a maioria dos casos
+  const format = `bestaudio[abr<=${bitrate}]`;
+  const args = ['-f', format, '-o', outputPath, url];
+  await runYtDlp(args);
+}
+
+module.exports = { runYtDlp, runYtDlpJson, downloadAudio };
 
