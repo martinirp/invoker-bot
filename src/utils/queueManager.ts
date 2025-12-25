@@ -356,6 +356,13 @@ class QueueManager {
           const existing = g.nowPlayingMessage;
           const newEmbed = createSongEmbed(baseSongData, 'playing', loopOn, autoOn);
           await existing.edit({ embeds: [newEmbed] }).catch(() => {});
+          // Garante que as reações estejam presentes
+          const neededReactions = ['🔁', '🎶', '⏭️'];
+          for (const emoji of neededReactions) {
+            if (!existing.reactions.cache.has(emoji)) {
+              try { await existing.react(emoji); } catch {}
+            }
+          }
         } catch (err) {
           // se falhar ao editar, ignoramos silenciosamente
         }
@@ -366,6 +373,7 @@ class QueueManager {
           g.nowPlayingMessage = sent;
           try { await sent.react('🔁'); } catch {}
           try { await sent.react('🎶'); } catch {}
+          try { await sent.react('⏭️'); } catch {} // Skip
         }
       }
 

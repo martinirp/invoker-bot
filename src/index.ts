@@ -490,6 +490,26 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
 
       return;
     }
+
+    // Skip (⏭️) — duplicata do autoDJ
+    if (reaction.emoji.name === '⏭️' || reaction.emoji.name === '⏭') {
+      try {
+        queueManager.skip(guildId);
+      } catch (e) {
+        console.error('[SKIP] erro ao tentar pular música:', e);
+      }
+
+      try { await reaction.users.remove(user.id); } catch {}
+
+      try {
+        const ch = g.textChannel || message.channel;
+        const feedback = await ch.send({ embeds: [createEmbed().setDescription('⏭️ Música pulada!')] });
+        setTimeout(() => feedback.delete().catch(() => {}), 2500);
+      } catch {}
+
+      // Não há ação extra como no autoDJ
+      return;
+    }
   } catch (e) {
     console.error('[REACTION] erro ao processar reação:', e);
   }

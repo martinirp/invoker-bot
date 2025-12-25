@@ -4,6 +4,15 @@ config();
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 
+// Inicia o updater em background como processo separado
+const updaterScript = path.join(__dirname, '../updater.js');
+const updaterProcess = spawn('node', [updaterScript], {
+  detached: true,
+  stdio: 'ignore',
+  cwd: process.cwd()
+});
+updaterProcess.unref();
+
 const RESTART_DELAY = 3000; // Delay antes de reiniciar (ms)
 const MAX_RESTARTS = 10; // Máximo de restarts consecutivos
 const RESTART_WINDOW = 60000; // Janela de tempo para contar restarts (ms)
