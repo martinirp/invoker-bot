@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const db = require('./src/utils/db');
 const { downloadAudio, runYtDlpJson } = require('./src/utils/ytDlp');
-const { fetchYoutubeMeta, fetchLastfmMeta } = require('./src/utils/metaFetcher');
+const { fetchYoutubeMeta, fetchLastfmMeta } = require('./src/utils/metaFetcher.js');
 const musicCacheDir = path.join(__dirname, 'music_cache_opus');
 
 function getAudioPath(videoId, bitrate = 128) {
