@@ -16,6 +16,7 @@ async function upgradeAll() {
   const songs = db.getAllSongs();
   for (const song of songs) {
     const videoId = song.videoId;
+    const title = song.title || '(sem título)';
     const file64 = getAudioPath(videoId, 64);
     const file128 = getAudioPath(videoId, 128);
     const isPlaying = false; // TODO: Integrar com player para checar se está tocando
@@ -23,23 +24,23 @@ async function upgradeAll() {
     // Se não existe arquivo 128kbps e não está tocando, faz upgrade
     if (fs.existsSync(file64) && !fs.existsSync(file128) && !isPlaying) {
       try {
-        console.log(`Baixando versão 128kbps para ${videoId}...`);
+        console.log(`Baixando versão 128kbps para ${videoId} - ${title}...`);
         await downloadAudio(videoId, 128, file128);
         db.updateSongFile(videoId, file128); // Atualiza caminho no banco
-        console.log(`Upgrade concluído para ${videoId}`);
+        console.log(`Upgrade concluído para ${videoId} - ${title}`);
       } catch (e) {
-        console.warn(`Falha ao fazer upgrade de ${videoId}:`, e.message);
+        console.warn(`Falha ao fazer upgrade de ${videoId} - ${title}:`, e.message);
       }
     }
     // Se não existe nenhum arquivo, baixa o 128kbps
     if (!fs.existsSync(file64) && !fs.existsSync(file128)) {
       try {
-        console.log(`Baixando áudio 128kbps para ${videoId} (ausente)...`);
+        console.log(`Baixando áudio 128kbps para ${videoId} - ${title} (ausente)...`);
         await downloadAudio(videoId, 128, file128);
         db.updateSongFile(videoId, file128);
-        console.log(`Download concluído para ${videoId}`);
+        console.log(`Download concluído para ${videoId} - ${title}`);
       } catch (e) {
-        console.warn(`Falha ao baixar ${videoId}:`, e.message);
+        console.warn(`Falha ao baixar ${videoId} - ${title}:`, e.message);
       }
     }
   }
