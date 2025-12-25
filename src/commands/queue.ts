@@ -99,7 +99,45 @@ async function execute(message) {
     }
   }
 
-  const sent = await textChannel.send({ embeds: [embed] });
+  let sent;
+  if (g.playing && g.current) {
+    sent = await textChannel.send({
+      embeds: [embed],
+      components: [
+        {
+          type: 1,
+          components: [
+            { type: 2, style: 2, emoji: '🔄', custom_id: 'queue_loop', label: 'Loop' },
+            { type: 2, style: 2, emoji: '🤖', custom_id: 'queue_autodj', label: 'AutoDJ' },
+            { type: 2, style: 2, emoji: '⏭️', custom_id: 'queue_skip', label: 'Skip' }
+          ]
+        }
+      ]
+    });
+
+    // Collector para os botões
+    const filter = i => ['queue_loop','queue_autodj','queue_skip'].includes(i.customId) && i.user.id === message.author.id;
+    const collector = sent.createMessageComponentCollector({ filter, time: 60000 });
+
+    collector.on('collect', async i => {
+      if (i.deferred || i.replied) return;
+      await i.deferUpdate();
+      if (i.customId === 'queue_loop') {
+        const loopCmd = require('./loop');
+        await loopCmd.execute(message, null, []);
+      } else if (i.customId === 'queue_autodj') {
+        const autodjCmd = require('./autodj');
+        await autodjCmd.execute(message);
+      } else if (i.customId === 'queue_skip') {
+        const skipCmd = require('./skip');
+        await skipCmd.execute(message);
+      }
+      // Remove botões após uso
+      await sent.edit({ components: [] }).catch(() => {});
+    });
+  } else {
+    sent = await textChannel.send({ embeds: [embed] });
+  }
 
   // Atualiza durations em background (assíncrono) e edita o embed quando disponível
   if (g && g.queue.length > 0) {
