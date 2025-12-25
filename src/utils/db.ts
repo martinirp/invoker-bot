@@ -12,7 +12,7 @@ function updateSongMeta(videoId, meta) {
 const Database = require('better-sqlite3');
 const path = require('path');
 
-const dbPath = path.join(__dirname, 'music.db');
+const dbPath = process.env.MUSIC_DB_PATH || path.join(__dirname, 'music.db');
 const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 
@@ -44,6 +44,13 @@ db.prepare(`
   )
 `).run();
 
+// MIGRATION: Adicionar coluna bitrate se não existir
+try {
+  db.prepare('ALTER TABLE songs ADD COLUMN bitrate INTEGER').run();
+} catch (e) {
+  // Ignora erro se coluna já existe
+}
+
 db.prepare(`
   CREATE TABLE IF NOT EXISTS search_keys (
     key TEXT,
@@ -59,12 +66,12 @@ db.prepare(`
 // =========================
 // INSERTS
 // =========================
-function insertSong({ videoId, title, artist, track, file }) {
+function insertSong({ videoId, title, artist, track, file, bitrate }) {
   db.prepare(`
     INSERT OR IGNORE INTO songs
-    (videoId, title, artist, track, file, createdAt)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(videoId, title || null, artist || null, track || null, file, Date.now());
+    (videoId, title, artist, track, file, createdAt, bitrate)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(videoId, title || null, artist || null, track || null, file, Date.now(), bitrate || null);
 }
 
 function insertKey(key, videoId) {
@@ -104,6 +111,12 @@ function updateSongFile(videoId, file) {
   db.prepare(`
     UPDATE songs SET file = ? WHERE videoId = ?
   `).run(file, videoId);
+}
+
+function updateSongBitrate(videoId, bitrate) {
+  db.prepare(`
+    UPDATE songs SET bitrate = ? WHERE videoId = ?
+  `).run(bitrate, videoId);
 }
 
 // =========================
@@ -179,7 +192,8 @@ module.exports = {
   updateSongFile,
   updateSongMeta,
   markSongUpdated,
-  isSongUpdated
+  isSongUpdated,
+  updateSongBitrate
 };
 
 

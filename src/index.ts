@@ -22,7 +22,7 @@ function sendDebugEmbed(guildId, msg) {
   if (allText.length > MAX_CHARS) {
     // Envia embed anterior
     if (state.lastMsg) {
-      textChannel.send({ embeds: [createEmbed().setTitle('Debug (cont.)').setDescription('```' + allText.slice(0, MAX_CHARS) + '```')] }).catch(() => {});
+      textChannel.send({ embeds: [createEmbed().setTitle('Debug (cont.)').setDescription('```' + allText.slice(0, MAX_CHARS) + '```')] }).catch(() => { });
     }
     // Restaura apenas a última mensagem
     state.messages = [msg];
@@ -31,11 +31,11 @@ function sendDebugEmbed(guildId, msg) {
 
   // Edita ou envia embed
   if (state.lastMsg) {
-    state.lastMsg.edit({ embeds: [createEmbed().setTitle('Debug').setDescription('```' + allText + '```')] }).catch(() => {});
+    state.lastMsg.edit({ embeds: [createEmbed().setTitle('Debug').setDescription('```' + allText + '```')] }).catch(() => { });
   } else {
     textChannel.send({ embeds: [createEmbed().setTitle('Debug').setDescription('```' + allText + '```')] }).then(m => {
       state.lastMsg = m;
-    }).catch(() => {});
+    }).catch(() => { });
   }
 }
 
@@ -47,21 +47,21 @@ console.log = function (...args) {
   try {
     const guildId = global.lastDebugGuildId;
     if (guildId) sendDebugEmbed(guildId, args.map(String).join(' '));
-  } catch {}
+  } catch { }
 };
 console.warn = function (...args) {
   originalWarn.apply(console, args);
   try {
     const guildId = global.lastDebugGuildId;
     if (guildId) sendDebugEmbed(guildId, args.map(String).join(' '));
-  } catch {}
+  } catch { }
 };
 console.error = function (...args) {
   originalError.apply(console, args);
   try {
     const guildId = global.lastDebugGuildId;
     if (guildId) sendDebugEmbed(guildId, args.map(String).join(' '));
-  } catch {}
+  } catch { }
 };
 // @ts-nocheck
 // ===============================================
@@ -72,7 +72,7 @@ if (global.botInstance) {
   console.log('🔄 Limpando instância anterior do bot...');
   try {
     if (global._clientInstance?.destroy) global._clientInstance.destroy();
-  } catch {}
+  } catch { }
 }
 global.botInstance = true;
 
@@ -127,6 +127,7 @@ const queueManager = require('./utils/queueManager');
 const { createEmbed, createSongEmbed } = require('./utils/embed');
 const { resolve } = require('./utils/resolver');
 const { ActionRowBuilder, ButtonBuilder } = require('discord.js');
+const { Worker } = require('worker_threads'); // Integration: Worker
 const { removeSongCompletely } = require('./utils/removeSong');
 const { startCacheMonitor } = require('./utils/cacheMonitor');
 
@@ -194,6 +195,27 @@ client.once(Events.ClientReady, c => {
   try { startCacheMonitor(); } catch (e) {
     console.error('[CACHE MONITOR] erro ao iniciar:', e.message);
   }
+
+  // 🔄 Iniciar Auto-Updater (64kbps -> 128kbps) em background
+  try {
+    const updaterScript = path.join(__dirname, '../scripts/upgradeAllTo128.ts');
+    // Necessário usar ts-node dentro do worker se estiver rodando em TS
+    // Mas como o Worker do Node não suporta .ts nativamente fácil sem loader, 
+    // vamos spawnar como processo filho detached ou usar worker com hack do ts-node.
+    // Simples: spawnar processo node.
+    const { spawn } = require('child_process');
+
+    console.log('[UPDATER] 🚀 Iniciando verificar de qualidade em background...');
+    const updater = spawn('npx', ['ts-node', updaterScript], {
+      stdio: 'inherit', // Para ver logs no console principal (ou 'ignore' para silenciar)
+      env: { ...process.env, MUSIC_DB_PATH: 'dist/utils/music.db' },
+      shell: true
+    });
+
+    updater.unref(); // Deixa rodar independente do bot morrer (opcional, ou manter ref para matar junto)
+  } catch (e) {
+    console.error('[UPDATER] Falha ao iniciar worker:', e);
+  }
 });
 
 // ===============================================
@@ -207,7 +229,7 @@ client.on(Events.MessageCreate, async message => {
   try {
     const m = message.content?.trim();
     const match = m ? m.match(/^!p(?:\s+([\s\S]+))?/i) : null;
-    
+
     if (match) {
       console.log('[EXTERNAL !p] Detectado: content=', m, 'query=', match[1]);
       const query = (match[1] || '').trim();
@@ -451,7 +473,7 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
               .setTitle('😔 Fui mutado')
               .setDescription('Alguém me mutou...\nAposto que foi o **PITUBA**.')
           ]
-        }).catch(() => {});
+        }).catch(() => { });
       }
       return;
     }
@@ -479,7 +501,7 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
             .setTitle('😔 Fui kickado')
             .setDescription('Aposto que foi o **PITUBA**.')
         ]
-      }).catch(() => {});
+      }).catch(() => { });
     }
 
     queueManager.resetGuild(guildId);
@@ -496,80 +518,91 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
 // 🧾 REACTIONS (loop toggle via 🔁)
 // ===============================================
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
-      // Remove (❌, 1️⃣ a 🔟) — handler para remoção na fila
-      if (reaction.emoji.name === '❌' || ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟'].includes(reaction.emoji.name)) {
-        const message = reaction.message;
-        if (!message || !message.guild) return;
-        const guildId = message.guild.id;
-        const g = queueManager.get(guildId);
-        // Só processa se for a mensagem da fila
-        if (!g || !g.queueMessage || message.id !== g.queueMessage.id) return;
-        if (g.queue.length === 0) return;
-        // Helper para formatar duração (duplicado de queue.ts para simplificar scope)
-        const durationToSeconds = (duration) => {
-          if (!duration) return 0;
-          const parts = duration.split(':').map(Number);
-          if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-          else if (parts.length === 2) return parts[0] * 60 + parts[1];
-          return 0;
-        };
-        const secondsToDuration = (seconds) => {
-          const hours = Math.floor(seconds / 3600);
-          const minutes = Math.floor((seconds % 3600) / 60);
-          const secs = seconds % 60;
-          return hours > 0
-             ? `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
-             : `${minutes}:${secs.toString().padStart(2, '0')}`;
-        };
+  // Remove (❌, 1️⃣ a 🔟) — handler para remoção na fila
+  if (reaction.emoji.name === '❌' || ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'].includes(reaction.emoji.name)) {
+    const message = reaction.message;
+    if (!message || !message.guild) return;
+    const guildId = message.guild.id;
+    const g = queueManager.get(guildId);
+    // Só processa se for a mensagem da fila
+    if (!g || !g.queueMessage || message.id !== g.queueMessage.id) return;
+    if (g.queue.length === 0) return;
+    // Helper para formatar duração (duplicado de queue.ts para simplificar scope)
+    const durationToSeconds = (duration) => {
+      if (!duration) return 0;
+      const parts = duration.split(':').map(Number);
+      if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+      else if (parts.length === 2) return parts[0] * 60 + parts[1];
+      return 0;
+    };
+    const secondsToDuration = (seconds) => {
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      const secs = seconds % 60;
+      return hours > 0
+        ? `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+        : `${minutes}:${secs.toString().padStart(2, '0')}`;
+    };
 
-        let idx = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟'].indexOf(reaction.emoji.name);
-        if (idx >= 0 && idx < g.queue.length) {
-          const removed = g.queue.splice(idx, 1)[0];
-          try { await reaction.users.remove(user.id); } catch {}
-          
-          // RECONSTRUIR EMBED ATUALIZADO
-          const queueSlice = g.queue.slice(0, 10);
-          const durations = await Promise.all(queueSlice.map(async song => {
-              if (song.duration) return song.duration;
-              if (song.metadata?.duration) return song.metadata.duration;
-              // Não buscar na API aqui para ser rápido na interação UI
-              return null;
-          }));
+    let idx = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'].indexOf(reaction.emoji.name);
+    if (idx >= 0 && idx < g.queue.length) {
+      const removed = g.queue.splice(idx, 1)[0];
+      try { await reaction.users.remove(user.id); } catch { }
 
-          let accumulatedSeconds = 0;
-          const list = queueSlice.map((s, i) => {
-              const duration = durations[i];
-              const durationSeconds = durationToSeconds(duration);
-              const timeUntil = accumulatedSeconds > 0 ? ` • Em ${secondsToDuration(accumulatedSeconds)}` : '';
-              const durationDisplay = duration ? ` [${duration}]` : '';
-              accumulatedSeconds += durationSeconds;
-              return `${i + 1}. ${s.title}${durationDisplay}${timeUntil}`;
-          }).join('\n');
+      // RECONSTRUIR EMBED ATUALIZADO
+      const queueSlice = g.queue.slice(0, 10);
+      const durations = await Promise.all(queueSlice.map(async song => {
+        if (song.duration) return song.duration;
+        if (song.metadata?.duration) return song.metadata.duration;
+        // Não buscar na API aqui para ser rápido na interação UI
+        return null;
+      }));
 
-          const totalDuration = accumulatedSeconds > 0 ? ` • Tempo total: ${secondsToDuration(accumulatedSeconds)}` : '';
+      let accumulatedSeconds = 0;
+      const list = queueSlice.map((s, i) => {
+        const duration = durations[i];
+        const durationSeconds = durationToSeconds(duration);
+        const timeUntil = accumulatedSeconds > 0 ? ` • Em ${secondsToDuration(accumulatedSeconds)}` : '';
+        const durationDisplay = duration ? ` [${duration}]` : '';
+        accumulatedSeconds += durationSeconds;
+        return `${i + 1}. ${s.title}${durationDisplay}${timeUntil}`;
+      }).join('\n');
 
-          const updatedEmbed = createEmbed().setTitle('🎶 Fila de reprodução');
-          if (g.playing && g.current) {
-               updatedEmbed.addFields({ name: '🎵 Tocando agora', value: `**${g.current.title}**` });
-          }
-          if (list) {
-              updatedEmbed.addFields({ name: `📜 Próximas músicas${totalDuration}`, value: list });
-          } else {
-               updatedEmbed.setDescription('A fila está vazia.');
-          }
-           
-          // Footer
-          if (g.queue.length > 10) {
-               updatedEmbed.setFooter({ text: `+ ${g.queue.length - 10} música(s) na fila` });
-          }
+      const totalDuration = accumulatedSeconds > 0 ? ` • Tempo total: ${secondsToDuration(accumulatedSeconds)}` : '';
 
-          try { await message.edit({ embeds: [updatedEmbed] }); } catch {}
-        }
-        if (reaction.emoji.name === '❌') {
-          try { await message.delete(); } catch {}
-        }
-        return;
+      const updatedEmbed = createEmbed().setTitle('🎶 Fila de reprodução');
+      if (g.playing && g.current) {
+        updatedEmbed.addFields({ name: '🎵 Tocando agora', value: `**${g.current.title}**` });
       }
+      if (list) {
+        updatedEmbed.addFields({ name: `📜 Próximas músicas${totalDuration}`, value: list });
+      } else {
+        updatedEmbed.setDescription('A fila está vazia.');
+      }
+
+      // Footer
+      if (g.queue.length > 10) {
+        updatedEmbed.setFooter({ text: `+ ${g.queue.length - 10} música(s) na fila` });
+      }
+
+      try { await message.edit({ embeds: [updatedEmbed] }); } catch { }
+
+      // REMOVER REAÇÕES EXCEDENTES
+      const EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
+      // Se fila tem tamanho 2, deve ter reações 0 e 1. A partir do index 2 (g.queue.length), remover.
+      for (let i = g.queue.length; i < EMOJIS.length; i++) {
+        const emojiToRemove = EMOJIS[i];
+        const reactionToRemove = message.reactions.cache.find(r => r.emoji.name === emojiToRemove);
+        if (reactionToRemove) {
+          try { await reactionToRemove.remove(); } catch { }
+        }
+      }
+    }
+    if (reaction.emoji.name === '❌') {
+      try { await message.delete(); } catch { }
+    }
+    return;
+  }
   try {
     if (user.bot) return;
 
@@ -591,16 +624,16 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
 
       try {
         const newEmbed = createSongEmbed(g.current, 'playing', g.loop, g.autoDJ);
-        await g.nowPlayingMessage.edit({ embeds: [newEmbed] }).catch(() => {});
-      } catch {}
+        await g.nowPlayingMessage.edit({ embeds: [newEmbed] }).catch(() => { });
+      } catch { }
 
-      try { await reaction.users.remove(user.id); } catch {}
+      try { await reaction.users.remove(user.id); } catch { }
 
       try {
         const ch = g.textChannel || message.channel;
         const feedback = await ch.send({ embeds: [createEmbed().setDescription(g.loop ? '🔁 Loop ativado' : '⏹️ Loop desativado')] });
-        setTimeout(() => feedback.delete().catch(() => {}), 2500);
-      } catch {}
+        setTimeout(() => feedback.delete().catch(() => { }), 2500);
+      } catch { }
       return;
     }
 
@@ -610,16 +643,16 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
 
       try {
         const newEmbed = createSongEmbed(g.current, 'playing', g.loop, g.autoDJ);
-        await g.nowPlayingMessage.edit({ embeds: [newEmbed] }).catch(() => {});
-      } catch {}
+        await g.nowPlayingMessage.edit({ embeds: [newEmbed] }).catch(() => { });
+      } catch { }
 
-      try { await reaction.users.remove(user.id); } catch {}
+      try { await reaction.users.remove(user.id); } catch { }
 
       try {
         const ch = g.textChannel || message.channel;
         const feedback = await ch.send({ embeds: [createEmbed().setDescription(g.autoDJ ? '🎶 Auto ativado' : '⏹️ Auto desativado')] });
-        setTimeout(() => feedback.delete().catch(() => {}), 2500);
-      } catch {}
+        setTimeout(() => feedback.delete().catch(() => { }), 2500);
+      } catch { }
 
       // Se acabou de ativar, já adicionar 2 recomendações imediatas
       if (g.autoDJ) {
@@ -641,13 +674,13 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         console.error('[SKIP] erro ao tentar pular música:', e);
       }
 
-      try { await reaction.users.remove(user.id); } catch {}
+      try { await reaction.users.remove(user.id); } catch { }
 
       try {
         const ch = g.textChannel || message.channel;
         const feedback = await ch.send({ embeds: [createEmbed().setDescription('⏭️ Música pulada!')] });
-        setTimeout(() => feedback.delete().catch(() => {}), 2500);
-      } catch {}
+        setTimeout(() => feedback.delete().catch(() => { }), 2500);
+      } catch { }
 
       // Não há ação extra como no autoDJ
       return;

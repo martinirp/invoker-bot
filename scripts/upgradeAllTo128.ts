@@ -1,66 +1,67 @@
-// scripts/upgradeAllTo128.ts
-// Atualiza todas as músicas para 128kbps, baixa e substitui se necessário, e mostra estatísticas
+import { config } from 'dotenv';
+// Força 128kbps para este script, independente do .env
+process.env.OPUS_BITRATE_K = '128';
+config();
 
-const fs = require('fs');
-const path = require('path');
+// Imports
 const db = require('../src/utils/db');
 const { downloadAudio } = require('../src/utils/ytDlp');
-
-const musicCacheDir = path.join(__dirname, '..', 'music_cache_opus');
-
-function getAudioPath(videoId, bitrate) {
-  return path.join(musicCacheDir, `${videoId}_${bitrate}k.opus`);
-}
-
-async function baixarOuSubstituir128(videoId) {
-  const file128 = getAudioPath(videoId, 128);
-  try {
-    await downloadAudio(videoId, 128, file128);
-    db.updateSongFile(videoId, file128);
-    db.markSongUpdated(videoId);
-    return true;
-  } catch (e) {
-    console.warn(`[ERRO] Falha ao baixar/substituir 128kbps para ${videoId}:`, e.message);
-    return false;
-  }
-}
+const cachePath = require('../src/utils/cachePath');
+const fs = require('fs');
+const path = require('path');
 
 async function main() {
-  const songs = db.getAllSongs();
-  let countNoFile = 0;
-  let count64 = 0;
-  let count128 = 0;
-  let countAtualizadas = 0;
+  console.log('🎵 Iniciando atualização da biblioteca para 128kbps...');
 
-  for (const song of songs) {
-    const videoId = song.videoId;
-    const file64 = getAudioPath(videoId, 64);
-    const file128 = getAudioPath(videoId, 128);
-    const has64 = fs.existsSync(file64);
-    const has128 = fs.existsSync(file128);
+  const allSongs = db.getAllSongs();
+  console.log(`📊 Total de músicas no banco: ${allSongs.length}`);
 
-    if (!has64 && !has128) {
-      console.log(`[MISS] ${videoId} não possui nenhum arquivo de áudio.`);
-      countNoFile++;
-      // Baixar 128kbps mesmo sem 64
-      if (await baixarOuSubstituir128(videoId)) countAtualizadas++;
-      continue;
-    }
-    if (has64) count64++;
-    if (has128) count128++;
+  const toUpdate = allSongs.filter((s: any) => !s.bitrate || s.bitrate < 128);
+  console.log(`⚠️  Músicas precisando de upgrade: ${toUpdate.length}`);
 
-    // Sempre baixa/substitui 128kbps se existe 64 ou 128
-    console.log(`[UPGRADE] Baixando/substituindo 128kbps para ${videoId}...`);
-    if (await baixarOuSubstituir128(videoId)) countAtualizadas++;
+  if (toUpdate.length === 0) {
+    console.log('✅ Todas as músicas já estão em 128kbps (ou marcado como tal).');
+    return;
   }
 
-  console.log('--- Estatísticas ---');
-  console.log(`Total de músicas: ${songs.length}`);
-  console.log(`Sem arquivo: ${countNoFile}`);
-  console.log(`Com 64kbps: ${count64}`);
-  console.log(`Com 128kbps: ${count128}`);
-  console.log(`Atualizadas para 128kbps nesta execução: ${countAtualizadas}`);
-  console.log('Upgrade concluído.');
+  let success = 0;
+  let fail = 0;
+
+  for (let i = 0; i < toUpdate.length; i++) {
+    const song = toUpdate[i];
+    const progress = `[${i + 1}/${toUpdate.length}]`;
+    console.log(`\n${progress} Processando: ${song.title.substring(0, 40)}...`);
+
+    const filePath = song.file || cachePath(song.videoId);
+
+    // Garantir diretório
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+    try {
+      console.log(`   ⬇️  Baixando (128kbps)...`);
+
+      // Baixar sobrescrevendo
+      await downloadAudio(song.videoId, 128, filePath);
+
+      // Atualizar DB
+      db.updateSongBitrate(song.videoId, 128);
+      console.log(`   ✅ Sucesso! DB atualizado.`);
+      success++;
+
+      // Delay gentil para evitar bloqueio do YouTube (importante!)
+      await new Promise(r => setTimeout(r, 2000));
+    } catch (err: any) {
+      console.error(`   ❌ Erro ao baixar: ${err.message}`);
+      fail++;
+    }
+  }
+
+  console.log('\n=============================================');
+  console.log('🎉 Finalizado!');
+  console.log(`✅ Atualizados: ${success}`);
+  console.log(`❌ Falhas: ${fail}`);
+  console.log('=============================================');
 }
 
-main();
+main().catch(console.error);
