@@ -30,13 +30,14 @@ async function upgradeAll() {
   console.log(`Músicas pendentes para atualizar: ${pendentesInit}`);
 
   for (const [idx, song] of songs.entries()) {
+    // Loga sempre qual música está sendo processada
     const videoId = song.videoId;
-    // Busca dados da música via yt-dlp
     let ytMeta = null;
     try {
       ytMeta = await runYtDlpJson(['-j', `https://youtube.com/watch?v=${videoId}`]);
     } catch {}
     const title = ytMeta?.title || song.title || '(sem título)';
+    console.log(`[Processando] ${idx + 1}/${songs.length}: ${title} (${videoId})`);
     const channel = ytMeta?.channel || ytMeta?.uploader || song.artist || '';
     const file64 = getAudioPath(videoId, 64);
     const file128 = getAudioPath(videoId, 128);
