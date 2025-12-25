@@ -60,7 +60,7 @@ module.exports = {
       // 🔥 RECARREGAR COMANDOS
       // =====================
       const commandsPath = path.join(__dirname);
-      const commandFiles = fs.readdirSync(commandsPath).filter(f => f.endsWith('.js'));
+      const commandFiles = fs.readdirSync(commandsPath).filter(f => f.endsWith('.js') || f.endsWith('.ts'));
 
       const newCommands = new Map();
       let commandsLoaded = 0;
@@ -98,7 +98,7 @@ module.exports = {
       // 🔧 RECARREGAR UTILS
       // =====================
       const utilsPath = path.join(__dirname, '../utils');
-      const utilFiles = fs.readdirSync(utilsPath).filter(f => f.endsWith('.js'));
+      const utilFiles = fs.readdirSync(utilsPath).filter(f => f.endsWith('.js') || f.endsWith('.ts'));
 
       let utilsLoaded = 0;
       let utilsErrors = 0;
