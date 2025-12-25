@@ -8,7 +8,7 @@ function updateSongMeta(videoId, meta) {
     UPDATE songs SET title = ?, artist = ?, track = ? WHERE videoId = ?
   `).run(meta.title || null, meta.artist || null, meta.track || null, videoId);
 }
-// @ts-nocheck
+// Observação: erros de variáveis não declaradas em outros arquivos (ex: updater.ts) indicam ausência no escopo local de uso, não necessariamente no projeto inteiro.
 const Database = require('better-sqlite3');
 const path = require('path');
 
