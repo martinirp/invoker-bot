@@ -75,8 +75,9 @@ process.on('uncaughtException', (err) => {
 
 process.on('unhandledRejection', (reason) => {
   const msg = (reason && typeof reason === 'object' && 'message' in reason) ? reason.message : String(reason);
-  if (/premature/i.test(msg) || /write EOF/i.test(msg)) {
-    console.warn('[GLOBAL] Ignorando rejeição por fechamento prematuro:', msg);
+  const msgStr = String(msg);
+  if (/premature/i.test(msgStr) || /write EOF/i.test(msgStr)) {
+    console.warn('[GLOBAL] Ignorando rejeição por fechamento prematuro:', msgStr);
     return;
   }
   console.error('[GLOBAL] Unhandled rejection:', reason);
