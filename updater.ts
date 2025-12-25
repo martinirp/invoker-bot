@@ -131,5 +131,7 @@ async function upgradeAll() {
 
 // Para rodar em background, basta chamar upgradeAll() de forma assíncrona no start.ts
 upgradeAll();
-    // Marca como processada no banco
-    db.markSongUpdated(videoId);
+      // Marca como processada no banco após processar cada música
+      if (atualizou) {
+        db.markSongUpdated(videoId);
+      }
