@@ -17,7 +17,15 @@ async function execute(message) {
   }
 
   const statusMsg = await message.channel.send({
-    embeds: [createEmbed().setDescription('🤖 Auto-DJ: buscando músicas relacionadas...')]
+    embeds: [createEmbed().setDescription('🤖 Auto-DJ: buscando músicas relacionadas...')],
+    components: [
+      {
+        type: 1,
+        components: [
+          { type: 2, style: 2, emoji: '⏭️', custom_id: 'autodj_skip', label: 'Skip' }
+        ]
+      }
+    ]
   });
 
   try {
@@ -60,7 +68,28 @@ async function execute(message) {
         createEmbed()
           .setTitle('🤖 Auto-DJ ativado')
           .setDescription(`✅ Adicionadas **${added}** músicas relacionadas à fila baseadas em:\n**${g.current.title}**`)
+      ],
+      components: [
+        {
+          type: 1,
+          components: [
+            { type: 2, style: 2, emoji: '⏭️', custom_id: 'autodj_skip', label: 'Skip' }
+          ]
+        }
       ]
+    });
+    // Coletor para o botão de skip
+    const filter = i => i.customId === 'autodj_skip' && i.user.id === message.author.id;
+    const collector = statusMsg.createMessageComponentCollector({ filter, time: 60000 });
+
+    collector.on('collect', async i => {
+      if (i.deferred || i.replied) return;
+      await i.deferUpdate();
+      // Executa o comando skip
+      const skipCmd = require('./skip');
+      await skipCmd.execute(message);
+      // Remove os botões após o uso
+      await statusMsg.edit({ components: [] }).catch(() => {});
     });
   } catch (error) {
     console.error('[AUTODJ] Erro:', error);
