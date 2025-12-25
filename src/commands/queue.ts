@@ -109,7 +109,7 @@ async function execute(message) {
           components: [
             { type: 2, style: 2, emoji: '🔄', custom_id: 'queue_loop', label: 'Loop' },
             { type: 2, style: 2, emoji: '🤖', custom_id: 'queue_autodj', label: 'AutoDJ' },
-            { type: 2, style: 2, emoji: '⏭️', custom_id: 'queue_skip', label: 'Skip' }
+            { type: 2, style: 2, emoji: '🇸', custom_id: 'queue_skip', label: 'Skip' }
           ]
         }
       ]
