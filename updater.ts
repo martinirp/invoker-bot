@@ -22,11 +22,10 @@ async function upgradeAll() {
   // Lista inicial de músicas pendentes
   const pendentesInit = songs.filter(song => {
     const videoId = song.videoId;
-    const file64 = getAudioPath(videoId, 64);
     const file128 = getAudioPath(videoId, 128);
     return !fs.existsSync(file128);
-  }).map(song => `${song.title || '(sem título)'} (${song.videoId})`);
-  console.log('Músicas pendentes para atualizar:', pendentesInit.length ? pendentesInit.join(', ') : 'Nenhuma');
+  });
+  console.log(`Músicas pendentes para atualizar: ${pendentesInit.length}`);
 
   for (const [idx, song] of songs.entries()) {
     const videoId = song.videoId;
