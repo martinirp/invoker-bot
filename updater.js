@@ -3,7 +3,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const db = require('./src/utils/db');
+const pathDb = path.join(__dirname, 'src', 'utils', 'db');
+const db = require(pathDb);
 const { downloadAudio, runYtDlpJson } = require('./src/utils/ytDlp');
 const { fetchYoutubeMeta, fetchLastfmMeta } = require('./src/utils/metaFetcher.js');
 const musicCacheDir = path.join(__dirname, 'music_cache_opus');
