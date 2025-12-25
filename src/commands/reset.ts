@@ -10,6 +10,18 @@ module.exports = {
   permission: 'ADMINISTRATOR',
 
   async execute(message, client) {
+    // --- SAVE STATE DA FILA ---
+    const savedQueues = {};
+    if (queueManager && queueManager.guilds) {
+      for (const [guildId, g] of queueManager.guilds) {
+        savedQueues[guildId] = {
+          current: g.current ? { ...g.current } : null,
+          queue: g.queue.map(song => ({ ...song })),
+          textChannelId: g.textChannel?.id,
+          voiceChannelId: g.voiceChannel?.id
+        };
+      }
+    }
     // Permissão de administrador
     if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
       return message.channel.send({
@@ -42,6 +54,30 @@ module.exports = {
 
       // Dar um tempo para desconectar
       await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // --- RESTORE STATE DA FILA APÓS REINICIAR ---
+      // Usar setTimeout para restaurar após o bot reconectar
+      setTimeout(async () => {
+        for (const guildId in savedQueues) {
+          const saved = savedQueues[guildId];
+          if (!saved || (!saved.current && saved.queue.length === 0)) continue;
+          // Recupera canais
+          const guild = client.guilds.cache.get(guildId);
+          const textChannel = saved.textChannelId ? guild?.channels?.cache?.get(saved.textChannelId) : null;
+          const voiceChannel = saved.voiceChannelId ? guild?.channels?.cache?.get(saved.voiceChannelId) : null;
+          // Restaura fila
+          if (voiceChannel && textChannel) {
+            // Restaura música atual
+            if (saved.current) {
+              await queueManager.playNow(guildId, voiceChannel, saved.current, textChannel);
+            }
+            // Restaura restante da fila
+            for (const song of saved.queue) {
+              await queueManager.play(guildId, voiceChannel, song, textChannel);
+            }
+          }
+        }
+      }, 5000); // Aguarda 5s para garantir reconexão
 
       await statusMsg.edit({
         embeds: [
