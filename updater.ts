@@ -16,23 +16,7 @@ function getAudioPath(videoId, bitrate = 128) {
 async function upgradeAll() {
   const songs = db.getAllSongs();
   const atualizadas = [];
-  const pendentes = [];
-  const metaAtualizados = [];
-  const metaNaoEncontrados = [];
-  // Lista inicial de músicas pendentes
-  const atualizadasInit = songs.filter(song => {
-    const videoId = song.videoId;
-    const file128 = getAudioPath(videoId, 128);
-    return fs.existsSync(file128);
-  });
-  const pendentesInit = songs.length - atualizadasInit.length;
-  console.log(`Músicas atualizadas: ${atualizadasInit.length}`);
-  console.log(`Músicas pendentes para atualizar: ${pendentesInit}`);
-
   for (const [idx, song] of songs.entries()) {
-    // Loga sempre qual música está sendo processada
-    // ...existing code...
-  }
     const videoId = song.videoId;
     let ytMeta = null;
     try {
@@ -114,6 +98,20 @@ async function upgradeAll() {
         atualizou = true;
       } catch (e) {
         console.warn(`Falha ao baixar ${videoId} - ${title}:`, e.message);
+      }
+    }
+    // Se não atualizou, está pendente
+    if (!atualizou && (!fs.existsSync(file128))) {
+      pendentes.push(`${title} (${videoId})`);
+    }
+    // Marca como processada no banco após processar cada música
+    if (atualizou) {
+      db.markSongUpdated(videoId);
+    }
+    // Progresso a cada 5 músicas atualizadas
+    if (atualizadas.length > 0 && atualizadas.length % 5 === 0) {
+      console.log(`[Progresso] ${atualizadas.length} músicas atualizadas:`, atualizadas.slice(-5).join(', '));
+    }
       }
     }
     // Se não atualizou, está pendente
