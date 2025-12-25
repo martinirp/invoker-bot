@@ -1,7 +1,7 @@
 import { Message, TextChannel } from 'discord.js';
 import { createEmbed } from '../utils/embed';
-import queueManager from '../utils/queueManager';
-import { getVideoDetails } from '../utils/youtubeApi';
+const queueManager = require('../utils/queueManager');
+const { getVideoDetails } = require('../utils/youtubeApi');
 
 /**
  * Converte duração em formato legível (HH:MM:SS ou MM:SS) para segundos
