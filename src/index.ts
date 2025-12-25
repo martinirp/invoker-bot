@@ -36,10 +36,11 @@ console.error = function (...args) {
 // ===============================================
 // 🚫 EVITAR MULTI INSTÂNCIAS
 // ===============================================
+let client;
 if (global.botInstance) {
   console.log('🔄 Limpando instância anterior do bot...');
   try {
-    if (client?.destroy) client.destroy();
+    if (global._clientInstance?.destroy) global._clientInstance.destroy();
   } catch {}
 }
 global.botInstance = true;
@@ -63,8 +64,8 @@ if (process.env.DEBUG_MODE === 'true') {
 // 🛡️ GLOBAL ERROR GUARDS
 // ===============================================
 process.on('uncaughtException', (err) => {
-  const msg = err?.message || '';
-  const code = err?.code || '';
+  const msg = (err && typeof err === 'object' && 'message' in err) ? err.message : String(err);
+  const code = (err && typeof err === 'object' && 'code' in err) ? err.code : '';
   if (code === 'ERR_STREAM_PREMATURE_CLOSE' || /premature/i.test(msg) || /write EOF/i.test(msg) || code === 'EOF') {
     console.warn('[GLOBAL] Ignorando fechamento prematuro de stream:', msg);
     return;
@@ -73,7 +74,7 @@ process.on('uncaughtException', (err) => {
 });
 
 process.on('unhandledRejection', (reason) => {
-  const msg = (reason && reason.message) ? reason.message : String(reason);
+  const msg = (reason && typeof reason === 'object' && 'message' in reason) ? reason.message : String(reason);
   if (/premature/i.test(msg) || /write EOF/i.test(msg)) {
     console.warn('[GLOBAL] Ignorando rejeição por fechamento prematuro:', msg);
     return;
@@ -113,7 +114,7 @@ const resettingGuilds = new Set();
 // ===============================================
 // 🔧 Client
 // ===============================================
-const client = new Client({
+client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
