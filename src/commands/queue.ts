@@ -99,11 +99,18 @@ async function execute(message) {
     }
   }
 
-  let sent;
-  if (g.playing && g.current) {
-    sent = await textChannel.send({ embeds: [embed] });
-  } else {
-    sent = await textChannel.send({ embeds: [embed] });
+
+
+  let sent = await textChannel.send({ embeds: [embed] });
+
+  // Adiciona reações de remoção na mensagem da fila
+  const EMOJIS = ['❌','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟'];
+  try {
+    for (let i = 0; i <= Math.min(10, g.queue.length); i++) {
+      await sent.react(EMOJIS[i]);
+    }
+  } catch (e) {
+    // Ignorar erros de reação
   }
 
   // Atualiza durations em background (assíncrono) e edita o embed quando disponível
