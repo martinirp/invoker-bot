@@ -10,49 +10,78 @@ const cachePath = require('../src/utils/cachePath');
 const fs = require('fs');
 const path = require('path');
 
+const log = (msg: string) => console.log(`[UPDATER] ${msg}`);
+
 async function main() {
   while (true) {
-    console.log('🎵 [LOOP] Iniciando ciclo de verificação (128kbps)...');
+    log('🎵 Iniciando ciclo de verificação... (Intervalo: 6h)');
 
     const allSongs = db.getAllSongs();
-    console.log(`📊 Total de músicas no banco: ${allSongs.length}`);
 
-    const toUpdate = allSongs.filter((s: any) => !s.bitrate || s.bitrate < 128);
-    console.log(`⚠️  Músicas precisando de upgrade: ${toUpdate.length}`);
+    // Categorias
+    let unknown = 0;
+    let low = 0; // < 128
+    let good = 0; // >= 128
+
+    const toUpdate = [];
+
+    for (const s of allSongs) {
+      if (!s.bitrate) {
+        unknown++;
+        toUpdate.push(s);
+      } else if (s.bitrate < 128) {
+        low++;
+        toUpdate.push(s);
+      } else {
+        good++;
+      }
+    }
+
+    log('📊 Relatório de Qualidade:');
+    log(`   ➤ Total: ${allSongs.length}`);
+    log(`   ➤ ✅ Qualidade Alta (>=128kbps): ${good}`);
+    log(`   ➤ ⚠️  Baixa (64kbps/Outros): ${low}`);
+    log(`   ➤ ❓ Desconhecido (Antigos): ${unknown}`);
+    log(`   ➤ 🔄 Fila para Upgrade: ${toUpdate.length}`);
 
     if (toUpdate.length === 0) {
-      console.log('✅ Todas as músicas já atualizadas.');
+      log('✅ Nada pendente. Tudo atualizado.');
     } else {
       let success = 0;
       let fail = 0;
 
+      log(`▶️  Iniciando processamento de ${toUpdate.length} músicas...`);
+
       for (let i = 0; i < toUpdate.length; i++) {
         const song = toUpdate[i];
-        const progress = `[${i + 1}/${toUpdate.length}]`;
-        console.log(`\n${progress} Processando: ${song.title.substring(0, 40)}...`);
+        const pct = Math.round(((i + 1) / toUpdate.length) * 100);
+        const progress = `[${i + 1}/${toUpdate.length} - ${pct}%]`;
+
+        log(`${progress} Melhorando: ${song.title.substring(0, 30)}...`);
 
         const filePath = song.file || cachePath(song.videoId);
         const dir = path.dirname(filePath);
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
         try {
-          console.log(`   ⬇️  Baixando (128kbps)...`);
+          // Baixar sobrescrevendo
           await downloadAudio(song.videoId, 128, filePath);
           db.updateSongBitrate(song.videoId, 128);
-          console.log(`   ✅ Sucesso!`);
+
           success++;
+          // Não esperar muito entre logs para deixar fluido, mas o delay de download existe
           await new Promise(r => setTimeout(r, 2000));
         } catch (err: any) {
-          console.error(`   ❌ Erro: ${err.message}`);
+          log(`❌ Falha em ${song.title}: ${err.message}`);
           fail++;
         }
       }
-      console.log(`\n🎉 Ciclo finalizado. Atualizados: ${success}, Falhas: ${fail}`);
+      log(`🎉 Ciclo finalizado. Sucesso: ${success} | Falhas: ${fail}`);
     }
 
-    // Esperar 6 horas antes da próxima verificação
+    // Esperar 6 horas
     const hours = 6;
-    console.log(`💤 Dormindo por ${hours} horas...`);
+    log(`💤 Dormindo por ${hours} horas...`);
     await new Promise(r => setTimeout(r, hours * 60 * 60 * 1000));
   }
 }
