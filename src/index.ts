@@ -5,7 +5,38 @@ function sendDebugEmbed(guildId, msg) {
   if (process.env.DISCORD_DEBUG !== 'true') return;
   const textChannel = lastTextChannel.get(guildId);
   if (!textChannel) return;
-  textChannel.send({ embeds: [createEmbed().setTitle('Debug').setDescription('```' + msg + '```')] }).catch(() => {});
+
+  // Armazenar mensagens acumuladas por guild
+  if (!global._debugEmbedState) global._debugEmbedState = {};
+  if (!global._debugEmbedState[guildId]) {
+    global._debugEmbedState[guildId] = { messages: [], lastMsg: null };
+  }
+  const state = global._debugEmbedState[guildId];
+  state.messages.push(msg);
+
+  // Limite de caracteres por embed (Discord: 4096 por descrição)
+  const MAX_CHARS = 4000;
+  let allText = state.messages.join('\n');
+
+  // Se exceder limite, cria novo embed e reseta
+  if (allText.length > MAX_CHARS) {
+    // Envia embed anterior
+    if (state.lastMsg) {
+      textChannel.send({ embeds: [createEmbed().setTitle('Debug (cont.)').setDescription('```' + allText.slice(0, MAX_CHARS) + '```')] }).catch(() => {});
+    }
+    // Restaura apenas a última mensagem
+    state.messages = [msg];
+    allText = msg;
+  }
+
+  // Edita ou envia embed
+  if (state.lastMsg) {
+    state.lastMsg.edit({ embeds: [createEmbed().setTitle('Debug').setDescription('```' + allText + '```')] }).catch(() => {});
+  } else {
+    textChannel.send({ embeds: [createEmbed().setTitle('Debug').setDescription('```' + allText + '```')] }).then(m => {
+      state.lastMsg = m;
+    }).catch(() => {});
+  }
 }
 
 const originalLog = console.log;
