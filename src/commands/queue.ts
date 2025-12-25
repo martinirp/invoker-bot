@@ -123,8 +123,9 @@ async function execute(message) {
       if (i.deferred || i.replied) return;
       await i.deferUpdate();
       if (i.customId === 'queue_loop') {
+        // Executa igual ao autodj: toggle
         const loopCmd = require('./loop');
-        await loopCmd.execute(message, null, []);
+        await loopCmd.execute(message, null, ['toggle']);
       } else if (i.customId === 'queue_autodj') {
         const autodjCmd = require('./autodj');
         await autodjCmd.execute(message);
