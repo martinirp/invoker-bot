@@ -103,12 +103,14 @@ async function execute(message) {
 
   let sent = await textChannel.send({ embeds: [embed] });
 
-  // Adiciona reações de remoção na mensagem da fila
+  // Adiciona reações de remoção na mensagem da fila e salva referência
   const EMOJIS = ['❌','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟'];
   try {
     for (let i = 0; i <= Math.min(10, g.queue.length); i++) {
       await sent.react(EMOJIS[i]);
     }
+    // Salva referência da mensagem da fila para identificar no handler
+    g.queueMessage = sent;
   } catch (e) {
     // Ignorar erros de reação
   }

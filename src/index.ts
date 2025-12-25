@@ -463,12 +463,15 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
 // 🧾 REACTIONS (loop toggle via 🔁)
 // ===============================================
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
-      // Remove (❌, 1️⃣ a 🔟) — handler para comando remove
+      // Remove (❌, 1️⃣ a 🔟) — handler para remoção na fila
       if (reaction.emoji.name === '❌' || ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟'].includes(reaction.emoji.name)) {
-        // Só processa se for mensagem do comando remove
-        if (!message.embeds?.[0]?.title?.includes('Remover música')) return;
-        const g = queueManager.guilds.get(guildId);
-        if (!g || g.queue.length === 0) return;
+        const message = reaction.message;
+        if (!message || !message.guild) return;
+        const guildId = message.guild.id;
+        const g = queueManager.get(guildId);
+        // Só processa se for a mensagem da fila
+        if (!g || !g.queueMessage || message.id !== g.queueMessage.id) return;
+        if (g.queue.length === 0) return;
         let idx = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟'].indexOf(reaction.emoji.name);
         if (idx >= 0 && idx < g.queue.length) {
           const removed = g.queue.splice(idx, 1)[0];
