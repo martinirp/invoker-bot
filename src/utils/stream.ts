@@ -20,9 +20,23 @@ function createOpusStreamFromUrl(url) {
 
   console.log(`[STREAM] ffmpeg opus settings: bitrate=${bitrateK}k compression=${compLevel}`);
 
-  const ytdlp = spawn('yt-dlp', ['-f', 'bestaudio', '-o', '-', url], {
+  const { getCookieArgs } = require('./ytDlp');
+  const cookieArgs = getCookieArgs();
+
+  // 🔥 Optimization: Add buffer-size and cookies to yt-dlp
+  const ytdlpArgs = [
+    ...cookieArgs,
+    '-f', 'bestaudio',
+    '--buffer-size', '1M',
+    '--no-playlist',
+    '-o', '-',
+    url
+  ];
+
+  const ytdlp = spawn('yt-dlp', ytdlpArgs, {
     stdio: ['ignore', 'pipe', 'pipe']
   });
+
   const ffmpeg = spawn('ffmpeg', [
     '-loglevel', 'quiet',
     '-i', 'pipe:0',
@@ -33,6 +47,15 @@ function createOpusStreamFromUrl(url) {
     'pipe:1'
   ], {
     stdio: ['pipe', 'pipe', 'ignore']
+  });
+
+  // 🔥 FIX: Add error handler for ffmpeg.stdin to catch EPIPE (broken pipe)
+  ffmpeg.stdin.on('error', err => {
+    if ((err as any).code === 'EPIPE') {
+      // Ignorar silenciosamente erro de pipe quebrado ao fechar
+      return;
+    }
+    console.error('[STREAM] ffmpeg.stdin erro:', err?.message || err);
   });
 
   // Conectar pipeline de forma explícita

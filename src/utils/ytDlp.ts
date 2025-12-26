@@ -25,16 +25,20 @@ function runProcess(cmd, args, options = {}) {
   });
 }
 
-async function runYtDlp(args, options = {}) {
-  // 🔥 FIX: Add YouTube cookies to bypass bot detection
+function getCookieArgs() {
   const cookieArgs = [];
-
   if (process.env.YOUTUBE_COOKIES_FROM_BROWSER) {
     cookieArgs.push('--cookies-from-browser', process.env.YOUTUBE_COOKIES_FROM_BROWSER);
-    console.log(`[YT-DLP] Using cookies from browser: ${process.env.YOUTUBE_COOKIES_FROM_BROWSER}`);
   } else if (process.env.YOUTUBE_COOKIES_FILE) {
     cookieArgs.push('--cookies', process.env.YOUTUBE_COOKIES_FILE);
-    console.log(`[YT-DLP] Using cookies from file: ${process.env.YOUTUBE_COOKIES_FILE}`);
+  }
+  return cookieArgs;
+}
+
+async function runYtDlp(args, options = {}) {
+  const cookieArgs = getCookieArgs();
+  if (cookieArgs.length > 0) {
+    console.log(`[YT-DLP] Using cookies configuration`);
   } else {
     console.warn('[YT-DLP] ⚠️ No cookies configured! YouTube may block requests.');
   }
@@ -65,5 +69,5 @@ async function downloadAudio(videoId, bitrate, outputPath) {
   await runYtDlp(args);
 }
 
-module.exports = { runYtDlp, runYtDlpJson, downloadAudio };
+module.exports = { runYtDlp, runYtDlpJson, downloadAudio, getCookieArgs };
 
