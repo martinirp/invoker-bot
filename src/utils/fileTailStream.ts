@@ -23,7 +23,7 @@ function createOpusTailStream(finalPath) {
   const nameForLog = path.basename(finalPath);
 
   const openHandle = (p) => {
-    if (fd) { try { fs.closeSync(fd); } catch {} }
+    if (fd) { try { fs.closeSync(fd); } catch { } }
     try {
       fd = fs.openSync(p, 'r');
       currentPath = p;
@@ -61,8 +61,31 @@ function createOpusTailStream(finalPath) {
             offset = statAfterSwitch.size;
           }
         }
-        const stat = fs.statSync(targetPath);
-        const available = stat.size - offset;
+
+        // --- LOGIC CHANGE: Patient Wait Loop ---
+        // Instead of reading once and failing, try to wait if we hit EOF but it's not the final file
+        let stat = fs.statSync(targetPath);
+        let available = stat.size - offset;
+
+        // Se não tem dados e ainda é .part, esperar um pouco (throtling do youtube)
+        if (available <= 0 && targetPath !== finalPath) {
+          let attempts = 0;
+          // Esperar até 15 segundos (30 * 500ms) se estiver vazio
+          while (available <= 0 && attempts < 30) {
+            await new Promise(r => setTimeout(r, 500));
+            try {
+              stat = fs.statSync(targetPath);
+              available = stat.size - offset;
+              if (available > 0) break;
+            } catch { }
+            attempts++;
+          }
+          if (available > 0) {
+            console.log(`[TAIL] recuperado após espera de ${attempts * 500}ms (novos dados chegaram)`);
+          }
+        }
+        // ---------------------------------------
+
         if (available > 0) {
           const toRead = Math.min(64 * 1024, available);
           const buf = Buffer.allocUnsafe(toRead);
@@ -81,7 +104,7 @@ function createOpusTailStream(finalPath) {
                   await new Promise(r => setTimeout(r, 100));
                   continue;
                 }
-              } catch {}
+              } catch { }
             }
 
             offset += bytesRead;
@@ -113,14 +136,14 @@ function createOpusTailStream(finalPath) {
         await new Promise(r => setTimeout(r, 100));
       }
     }
-    try { if (fd) fs.closeSync(fd); } catch {}
+    try { if (fd) fs.closeSync(fd); } catch { }
     console.log(`[TAIL] end file=${nameForLog} totalBytes=${offset} final=${currentPath === finalPath}`);
     out.end();
   };
 
   out.on('close', () => {
     closed = true;
-    try { if (fd) fs.closeSync(fd); } catch {}
+    try { if (fd) fs.closeSync(fd); } catch { }
   });
 
   setImmediate(() => { readLoop(); });
