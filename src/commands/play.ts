@@ -36,7 +36,7 @@ async function execute(message) {
   if (!query) return;
 
   const statusMsg = await textChannel.send({
-    embeds: [createEmbed().setDescription('🔍 Processando…')]
+    embeds: [createEmbed().setDescription('🔍 Processando Legal')]
   });
 
   try {
@@ -60,7 +60,7 @@ async function execute(message) {
         // Tocar a primeira faixa IMEDIATAMENTE
         console.log(`[PLAY][SPOTIFY-PL] Resolvendo primeira faixa: "${tracks[0].query}"`);
         const firstRes = await resolveWithCache(tracks[0].query, resolve);
-        const firstSong = firstRes && firstRes.videoId 
+        const firstSong = firstRes && firstRes.videoId
           ? { videoId: firstRes.videoId, title: firstRes.title || tracks[0].query }
           : null;
 
@@ -80,11 +80,11 @@ async function execute(message) {
         // Resolver resto em PARALELO em background (sem bloquear)
         if (tracks.length > 1) {
           console.log(`[PLAY][SPOTIFY-PL] Enfileirando ${tracks.length - 1} faixas restantes (paralelo) em background...`);
-          
+
           (async () => {
             const remaining = tracks.slice(1);
             const queries = remaining.map(t => t.query);
-            
+
             const { results, errors } = await resolveParallel(queries, resolve, 10); // 10 concurrent
 
             let added = 0;
@@ -105,7 +105,7 @@ async function execute(message) {
                   createEmbed()
                     .setDescription(`✅ Playlist Spotify completa: **${added}** faixas adicionadas à fila.${errors.length > 0 ? ` ⚠️ ${errors.length} não conseguidas.` : ''}`)
                 ]
-              }).catch(() => {});
+              }).catch(() => { });
             }
           })();
         }
@@ -116,7 +116,7 @@ async function execute(message) {
       console.log('[PLAY] Detectado link Spotify (track), resolvendo metadata...');
 
       const spotifyData = await resolveSpotifyTrack(query);
-      
+
       if (!spotifyData) {
         throw new Error('Não foi possível resolver o link do Spotify. Tente novamente.');
       }
@@ -230,7 +230,7 @@ async function execute(message) {
             });
           }
 
-          askMsg.edit({ components: [] }).catch(() => {});
+          askMsg.edit({ components: [] }).catch(() => { });
         });
       }
 
@@ -241,7 +241,7 @@ async function execute(message) {
     // 🔗 OUTRAS FONTES (SoundCloud/Bandcamp/Direct URLs)
     // =====================================================
     const sourceType = detectSourceType(query);
-    
+
     if (sourceType !== 'search' && sourceType !== 'youtube') {
       const { runYtDlpJson } = require('../utils/ytDlp');
 
@@ -313,14 +313,14 @@ async function execute(message) {
     });
   } catch (err) {
     console.error('[PLAY] Erro:', err);
-    
+
     await statusMsg.edit({
       embeds: [
         createEmbed()
           .setTitle('❌ Erro ao processar')
           .setDescription(err.message || 'Vídeo inválido ou inacessível')
       ]
-    }).catch(() => {});
+    }).catch(() => { });
   }
 }
 
