@@ -200,5 +200,6 @@ module.exports = {
   markSongUpdated,
   isSongUpdated,
   deleteSong,
+  searchSongs,
   clearSearchKeys
 };
