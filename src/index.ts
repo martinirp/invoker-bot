@@ -195,27 +195,6 @@ client.once(Events.ClientReady, c => {
   try { startCacheMonitor(); } catch (e) {
     console.error('[CACHE MONITOR] erro ao iniciar:', e.message);
   }
-
-  // 🔄 Iniciar Auto-Updater (64kbps -> 128kbps) em background
-  try {
-    const updaterScript = path.join(__dirname, '../scripts/upgradeAllTo128.ts');
-    // Necessário usar ts-node dentro do worker se estiver rodando em TS
-    // Mas como o Worker do Node não suporta .ts nativamente fácil sem loader, 
-    // vamos spawnar como processo filho detached ou usar worker com hack do ts-node.
-    // Simples: spawnar processo node.
-    const { spawn } = require('child_process');
-
-    console.log('[UPDATER] 🚀 Iniciando verificar de qualidade em background...');
-    const updater = spawn('npx', ['ts-node', updaterScript], {
-      stdio: 'inherit', // Para ver logs no console principal (ou 'ignore' para silenciar)
-      env: { ...process.env, MUSIC_DB_PATH: 'dist/utils/music.db' },
-      shell: true
-    });
-
-    updater.unref(); // Deixa rodar independente do bot morrer (opcional, ou manter ref para matar junto)
-  } catch (e) {
-    console.error('[UPDATER] Falha ao iniciar worker:', e);
-  }
 });
 
 // ===============================================
