@@ -58,7 +58,7 @@ class QueueManager {
       const player = createAudioPlayer({
         behaviors: {
           noSubscriber: NoSubscriberBehavior.Pause,
-          maxMissedFrames: 1
+          maxMissedFrames: 10
         }
       });
 
@@ -113,7 +113,7 @@ class QueueManager {
     const playerStatus = g.player?.state?.status;
     const isPlayerActive = playerStatus === AudioPlayerStatus.Playing || playerStatus === AudioPlayerStatus.Buffering;
     const wasPlaying = g.playing && isPlayerActive;
-    
+
     const queueSize = g.queue.length;
     console.log(`[QUEUE] ${guildId} → adicionando: ${song.title} (playing=${wasPlaying}, playerStatus=${playerStatus}, queue_size=${queueSize})`);
     g.queue.push(song);
@@ -202,7 +202,7 @@ class QueueManager {
 
       g.textChannel?.send({
         embeds: [createEmbed().setDescription('Fila encerrada.')]
-      }).catch(() => {});
+      }).catch(() => { });
 
       // Iniciar timer para desconectar se vazio
       this.startAutoDisconnect(guildId);
@@ -217,7 +217,7 @@ class QueueManager {
       g.failedAttempts.delete(song.videoId);
       g.textChannel?.send({
         embeds: [createEmbed().setDescription(`❌ Erro ao tocar **${song.title}**, pulando...`)]
-      }).catch(() => {});
+      }).catch(() => { });
       this.next(guildId);
       return;
     }
@@ -291,25 +291,25 @@ class QueueManager {
       if (!usedTail) {
         // Fallback: stream direto (tocando enquanto baixa em paralelo)
         console.log(`[PLAYBACK][${guildId}] src=stream (sem .part)`);
-        const stream = song.streamUrl 
+        const stream = song.streamUrl
           ? createOpusStreamFromUrl(song.streamUrl)
           : createOpusStream(song.videoId);
 
-      stream.on('error', err => {
-        const code = err?.code || '';
-        const msg = err?.message || '';
-        if (code === 'EPIPE' || code === 'EOF' || /premature/i.test(msg)) {
-          console.warn('[STREAM] aviso (não crítico):', msg || code);
+        stream.on('error', err => {
+          const code = err?.code || '';
+          const msg = err?.message || '';
+          if (code === 'EPIPE' || code === 'EOF' || /premature/i.test(msg)) {
+            console.warn('[STREAM] aviso (não crítico):', msg || code);
+            g.currentStream = null;
+            return;
+          }
+          console.error('[STREAM] erro crítico:', err);
           g.currentStream = null;
-          return;
-        }
-        console.error('[STREAM] erro crítico:', err);
-        g.currentStream = null;
-        if (!g.failedAttempts) g.failedAttempts = new Map();
-        const attempts = g.failedAttempts.get(song.videoId) || 0;
-        g.failedAttempts.set(song.videoId, attempts + 1);
-        this.next(guildId);
-      });
+          if (!g.failedAttempts) g.failedAttempts = new Map();
+          const attempts = g.failedAttempts.get(song.videoId) || 0;
+          g.failedAttempts.set(song.videoId, attempts + 1);
+          this.next(guildId);
+        });
 
         g.currentStream = stream;
         resource = createAudioResource(stream, { inputType: StreamType.OggOpus, inlineVolume: false });
@@ -355,12 +355,12 @@ class QueueManager {
         try {
           const existing = g.nowPlayingMessage;
           const newEmbed = createSongEmbed(baseSongData, 'playing', loopOn, autoOn);
-          await existing.edit({ embeds: [newEmbed] }).catch(() => {});
+          await existing.edit({ embeds: [newEmbed] }).catch(() => { });
           // Garante que as reações estejam presentes
           const neededReactions = ['🔁', '🎶', '⏭️'];
           for (const emoji of neededReactions) {
             if (!existing.reactions.cache.has(emoji)) {
-              try { await existing.react(emoji); } catch {}
+              try { await existing.react(emoji); } catch { }
             }
           }
         } catch (err) {
@@ -371,9 +371,9 @@ class QueueManager {
 
         if (sent) {
           g.nowPlayingMessage = sent;
-          try { await sent.react('🔁'); } catch {}
-          try { await sent.react('🎶'); } catch {}
-          try { await sent.react('⏭️'); } catch {} // Skip
+          try { await sent.react('🔁'); } catch { }
+          try { await sent.react('🎶'); } catch { }
+          try { await sent.react('⏭️'); } catch { } // Skip
         }
       }
 
@@ -393,9 +393,9 @@ class QueueManager {
               const loopOnRef = !!g.loop;
               const autoOnRef = !!g.autoDJ;
               const newEmbed = createSongEmbed(updatedData, 'playing', loopOnRef, autoOnRef);
-              try { await g.nowPlayingMessage?.edit({ embeds: [newEmbed] }); } catch {}
+              try { await g.nowPlayingMessage?.edit({ embeds: [newEmbed] }); } catch { }
             }
-          } catch {}
+          } catch { }
         })();
       }
 
@@ -410,7 +410,7 @@ class QueueManager {
       }
     } catch (e) {
       // Falha em enviar embed não é crítico
-      try { g.textChannel?.send({ embeds: [createSongEmbed(baseSongData, 'playing', false, false)] }); } catch {}
+      try { g.textChannel?.send({ embeds: [createSongEmbed(baseSongData, 'playing', false, false)] }); } catch { }
     }
 
     // 🟢 Prefetch próxima música se existir na fila
@@ -445,7 +445,7 @@ class QueueManager {
     const g = this.get(guildId);
 
     if (g.currentStream) {
-      try { g.currentStream.destroy(); } catch {}
+      try { g.currentStream.destroy(); } catch { }
     }
 
     this.next(guildId);
@@ -461,13 +461,13 @@ class QueueManager {
     }
 
     if (g.currentStream) {
-      try { g.currentStream.destroy(); } catch {}
+      try { g.currentStream.destroy(); } catch { }
     }
 
     downloadQueue.resetGuild(guildId);
 
-    try { g.player.stop(true); } catch {}
-    try { g.connection?.destroy(); } catch {}
+    try { g.player.stop(true); } catch { }
+    try { g.connection?.destroy(); } catch { }
 
     this.guilds.delete(guildId);
 
@@ -493,7 +493,7 @@ class QueueManager {
 
       guild.textChannel?.send({
         embeds: [createEmbed().setDescription('⏱️ Desconectado por inatividade.')]
-      }).catch(() => {});
+      }).catch(() => { });
 
       // Limpar flag após 5s
       setTimeout(() => this.selfDisconnecting.delete(guildId), 5000);
@@ -512,7 +512,7 @@ class QueueManager {
 
       g.textChannel?.send({
         embeds: [createEmbed().setDescription('👋 Desconectado (sozinho no canal).')]
-      }).catch(() => {});
+      }).catch(() => { });
 
       setTimeout(() => this.selfDisconnecting.delete(guildId), 5000);
     }
@@ -539,7 +539,7 @@ class QueueManager {
         try {
           console.log('[AUTODJ] 🎯 Step 1: Buscando recomendações via Last.FM...');
           console.log(`[AUTODJ] 📝 Título atual: "${currentTitle}"`);
-          
+
           // Extrair artista e música
           const extracted = await this._extractArtistTrack(g.current);
           const artistName = extracted.artist;
@@ -721,8 +721,8 @@ class QueueManager {
               require('./embed').createEmbed()
                 .setDescription(`🎶 Auto: adicionadas ${added} recomendações à fila.`)
             ]
-          }).catch(() => {});
-        } catch {}
+          }).catch(() => { });
+        } catch { }
       }
 
       return added;
@@ -827,7 +827,7 @@ class QueueManager {
         const axios = require('axios');
         const url = `https://ws.audioscrobbler.com/2.0/?method=track.search&track=${encodeURIComponent(cleanedTitle)}&limit=1&api_key=${process.env.LASTFM_API_KEY}&format=json`;
         const res = await axios.get(url, { timeout: 5000 });
-        
+
         const track = res.data?.results?.trackmatches?.track?.[0];
         if (track && track.artist) {
           console.log(`[EXTRACT] ✅ Encontrado no Last.FM: "${track.artist}" - "${track.name}"`);
@@ -859,7 +859,7 @@ class QueueManager {
       const cleanArtist = String(artistName || '').replace(/\s+/g, ' ').trim();
       const cleanTrack = this._cleanTitle(String(trackName || ''));
       console.log(`[LASTFM] 🔍 Buscando: "${cleanArtist}" - "${cleanTrack}"`);
-      
+
       const url =
         `https://ws.audioscrobbler.com/2.0/?` +
         `method=track.getsimilar` +
@@ -870,14 +870,14 @@ class QueueManager {
         `&format=json`;
 
       console.log(`[LASTFM] 📡 URL: ${url}`);
-      
+
       const res = await require('axios').get(url, { timeout: 5000 });
       console.log(`[LASTFM] ✅ Status: ${res.status}`);
       console.log(`[LASTFM] 📦 Response data:`, JSON.stringify(res.data).substring(0, 200));
-      
+
       let tracks = res.data?.similartracks?.track ?? [];
       console.log(`[LASTFM] 📋 Tracks antes de validação:`, Array.isArray(tracks), typeof tracks, tracks.length || 'N/A');
-      
+
       // Garantir que é array (Last.FM retorna objeto se houver 1 resultado)
       if (!Array.isArray(tracks)) {
         console.log(`[LASTFM] ⚠️ Convertendo objeto para array`);
@@ -885,13 +885,13 @@ class QueueManager {
       }
 
       console.log(`[LASTFM] 📊 Total de tracks: ${tracks.length}`);
-      
+
       const result = tracks.map(t => {
         const formatted = `${t.artist.name} - ${t.name}`;
         console.log(`[LASTFM] ✨ Formatado: "${formatted}"`);
         return formatted;
       });
-      
+
       console.log(`[LASTFM] ✅ Retornando ${result.length} recomendações`);
       return result;
     } catch (err) {

@@ -21,7 +21,7 @@ function createOpusStreamFromUrl(url) {
   console.log(`[STREAM] ffmpeg opus settings: bitrate=${bitrateK}k compression=${compLevel}`);
 
   const ytdlp = spawn('yt-dlp', ['-f', 'bestaudio', '-o', '-', url], {
-    stdio: ['ignore', 'pipe', 'ignore']
+    stdio: ['ignore', 'pipe', 'pipe']
   });
   const ffmpeg = spawn('ffmpeg', [
     '-loglevel', 'quiet',
@@ -41,12 +41,21 @@ function createOpusStreamFromUrl(url) {
   // Propagar erros do pipeline (sem causar exceções no consumidor)
   ytdlp.on('error', err => {
     console.error('[STREAM] yt-dlp erro:', err?.message || err);
-    try { ffmpeg.stdin.end(); } catch {}
+    try { ffmpeg.stdin.end(); } catch { }
   });
+
+  // Capture yt-dlp stderr for debugging
+  ytdlp.stderr.on('data', chunk => {
+    const msg = chunk.toString();
+    // Ignorar warnings comuns para não poluir
+    if (msg.includes('warning') || msg.includes('WARNING')) return;
+    console.error(`[STREAM][yt-dlp-err] ${msg.trim()}`);
+  });
+
   ffmpeg.on('error', err => {
     console.error('[STREAM] ffmpeg erro:', err?.message || err);
   });
-  
+
   // Passar stream diretamente sem buffer estratégico
   const { PassThrough } = require('stream');
   const bufferedStream = new PassThrough();
@@ -54,9 +63,9 @@ function createOpusStreamFromUrl(url) {
   ffmpeg.stdout.on('data', chunk => {
     // Respeitar backpressure: pausar leitura se necessário
     if (!bufferedStream.push(chunk)) {
-      try { ffmpeg.stdout.pause(); } catch {}
+      try { ffmpeg.stdout.pause(); } catch { }
       bufferedStream.once('drain', () => {
-        try { ffmpeg.stdout.resume(); } catch {}
+        try { ffmpeg.stdout.resume(); } catch { }
       });
     }
   });
@@ -66,17 +75,17 @@ function createOpusStreamFromUrl(url) {
     bufferedStream.end();
   });
   ffmpeg.stdout.on('close', () => {
-    try { bufferedStream.end(); } catch {}
+    try { bufferedStream.end(); } catch { }
   });
   ffmpeg.stdout.on('error', err => {
     console.error('[STREAM] stdout erro:', err?.message || err);
-    try { bufferedStream.end(); } catch {}
+    try { bufferedStream.end(); } catch { }
   });
 
   // Encerramento coordenado dos processos quando o consumidor termina
   const cleanup = () => {
-    try { ytdlp.kill('SIGKILL'); } catch {}
-    try { ffmpeg.kill('SIGKILL'); } catch {}
+    try { ytdlp.kill('SIGKILL'); } catch { }
+    try { ffmpeg.kill('SIGKILL'); } catch { }
   };
   bufferedStream.on('close', cleanup);
   bufferedStream.on('end', cleanup);
