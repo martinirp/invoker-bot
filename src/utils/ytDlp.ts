@@ -31,8 +31,12 @@ async function runYtDlp(args, options = {}) {
 
   if (process.env.YOUTUBE_COOKIES_FROM_BROWSER) {
     cookieArgs.push('--cookies-from-browser', process.env.YOUTUBE_COOKIES_FROM_BROWSER);
+    console.log(`[YT-DLP] Using cookies from browser: ${process.env.YOUTUBE_COOKIES_FROM_BROWSER}`);
   } else if (process.env.YOUTUBE_COOKIES_FILE) {
     cookieArgs.push('--cookies', process.env.YOUTUBE_COOKIES_FILE);
+    console.log(`[YT-DLP] Using cookies from file: ${process.env.YOUTUBE_COOKIES_FILE}`);
+  } else {
+    console.warn('[YT-DLP] ⚠️ No cookies configured! YouTube may block requests.');
   }
 
   const finalArgs = [...cookieArgs, ...args];
