@@ -26,7 +26,17 @@ function runProcess(cmd, args, options = {}) {
 }
 
 async function runYtDlp(args, options = {}) {
-  return runProcess('yt-dlp', args, options);
+  // 🔥 FIX: Add YouTube cookies to bypass bot detection
+  const cookieArgs = [];
+
+  if (process.env.YOUTUBE_COOKIES_FROM_BROWSER) {
+    cookieArgs.push('--cookies-from-browser', process.env.YOUTUBE_COOKIES_FROM_BROWSER);
+  } else if (process.env.YOUTUBE_COOKIES_FILE) {
+    cookieArgs.push('--cookies', process.env.YOUTUBE_COOKIES_FILE);
+  }
+
+  const finalArgs = [...cookieArgs, ...args];
+  return runProcess('yt-dlp', finalArgs, options);
 }
 
 async function runYtDlpJson(args, options = {}) {
