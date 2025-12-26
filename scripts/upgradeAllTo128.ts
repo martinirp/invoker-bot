@@ -57,7 +57,7 @@ async function main() {
         const pct = Math.round(((i + 1) / toUpdate.length) * 100);
         const progress = `[${i + 1}/${toUpdate.length} - ${pct}%]`;
 
-        log(`${progress} Melhorando: ${song.title.substring(0, 30)}...`);
+        log(`${progress} Processando Legal: ${song.title.substring(0, 30)}...`);
 
         const filePath = song.file || cachePath(song.videoId);
         const dir = path.dirname(filePath);
