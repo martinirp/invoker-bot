@@ -300,10 +300,12 @@ class QueueManager {
           const msg = err?.message || '';
           if (code === 'EPIPE' || code === 'EOF' || /premature/i.test(msg)) {
             console.warn('[STREAM] aviso (não crítico):', msg || code);
+            try { stream.destroy(); } catch { } // 🔥 FIX: Destruir stream
             g.currentStream = null;
             return;
           }
           console.error('[STREAM] erro crítico:', err);
+          try { stream.destroy(); } catch { } // 🔥 FIX: Destruir stream
           g.currentStream = null;
           if (!g.failedAttempts) g.failedAttempts = new Map();
           const attempts = g.failedAttempts.get(song.videoId) || 0;
@@ -333,8 +335,24 @@ class QueueManager {
 
     g.player.once(AudioPlayerStatus.Idle, () => {
       g.currentStream = null;
+      g.nowPlayingMessage = null; // 🔥 FIX: Limpar referência para evitar memory leak
+
       // Limpar contador de falhas ao tocar com sucesso
-      if (g.failedAttempts) g.failedAttempts.delete(song.videoId);
+      if (g.failedAttempts) {
+        g.failedAttempts.delete(song.videoId);
+
+        // 🔥 FIX: Limpar tentativas antigas (>1h) para evitar Map crescer infinitamente
+        const now = Date.now();
+        const oneHourAgo = now - 3600000;
+        for (const [vid, count] of g.failedAttempts.entries()) {
+          // Se não tiver timestamp, assumir que é antigo
+          if (typeof count === 'number' && count > 0) {
+            // Versão antiga sem timestamp, limpar se >3 falhas
+            if (count >= 3) g.failedAttempts.delete(vid);
+          }
+        }
+      }
+
       this.next(guildId);
     });
 

@@ -2,27 +2,7 @@
 const db = require('./db');
 const { runYtDlp } = require('./ytDlp');
 const { searchYouTube, getVideoDetails, searchYouTubeMultiple } = require('./youtubeApi');
-
-// =========================
-// NORMALIZAÇÃO
-// =========================
-function normalize(text) {
-  return text
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9 ]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-// PATCH 1️⃣ - Adicionar função tokenize
-function tokenize(text) {
-  return text
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(t => t.length >= 3);
-}
+const { normalize, tokenize } = require('./textUtils'); // 🔥 FIX: Import shared utils
 
 // =========================
 // VARIANTS
@@ -54,7 +34,7 @@ async function resolve(query) {
 
   // PATCH 2️⃣ - Tokenizar a query
   const queryTokens = tokenize(query);
-  
+
   const variants = buildVariants(query);
 
   console.log('[RESOLVER] variants da query:', variants);
@@ -67,11 +47,11 @@ async function resolve(query) {
     const hit = db.findByKey(key);
     if (!hit) continue;
 
-    const song = db.getByVideoId(hit.videoId);
-    if (!song) continue;
+    // 🔥 FIX: Use combined query instead of 2 separate calls
+    const result = db.getSongWithKeys(hit.videoId);
+    if (!result) continue;
 
-    // 🔒 REGRA FORTE: verificar se todos os tokens da query existem nas chaves da música
-    const songKeys = db.getKeysByVideoId(hit.videoId);
+    const { song, keys: songKeys } = result;
     const songKeyText = songKeys.join(' ');
 
     const valid = queryTokens.every(t => songKeyText.includes(t));
@@ -110,13 +90,13 @@ async function resolve(query) {
       thumbnail: apiResult.thumbnail,
       channelId: apiResult.channelId
     };
-    
+
     // Buscar detalhes completos (duração, views)
     const details = await getVideoDetails(videoId);
     if (details) {
       metadata = { ...metadata, ...details };
     }
-    
+
     console.log(`[RESOLVER] YouTube API resolveu → ${videoId}`);
   } else {
     // Tentar busca múltipla via API/Piped antes de chamar yt-dlp
@@ -126,11 +106,11 @@ async function resolve(query) {
       videoId = top.videoId;
       title = top.title;
       metadata = { channel: top.channel, thumbnail: top.thumbnail };
-      
+
       // Buscar detalhes se possível
       const details = await getVideoDetails(videoId);
       if (details) metadata = { ...metadata, ...details };
-      
+
       console.log(`[RESOLVER] Fallback API/Piped resolveu → ${videoId}`);
     } else {
       // Fallback: yt-dlp com flags de otimização
@@ -141,25 +121,25 @@ async function resolve(query) {
           '--skip-download',
           '--no-playlist',
           '--no-warnings',
-          '--extractor-retries','1',
-          '--socket-timeout','5',
-          '--print','%(id)s|||%(title)s'
+          '--extractor-retries', '1',
+          '--socket-timeout', '5',
+          '--print', '%(id)s|||%(title)s'
         ];
         const { stdout } = await runYtDlp(args);
-        
+
         if (!stdout) {
           throw new Error('yt-dlp não retornou resultado');
         }
-        
+
         const parts = stdout.trim().split('|||');
         if (parts.length < 2) {
           throw new Error('yt-dlp retornou formato inválido');
         }
-        
+
         videoId = parts[0].trim();
         title = parts[1].trim();
         metadata = { source: 'yt-dlp' };
-        
+
         console.log(`[RESOLVER] yt-dlp resolveu → ${videoId} (${title})`);
       } catch (ytdlpErr) {
         console.error(`[RESOLVER] yt-dlp falhou: ${ytdlpErr.message}`);

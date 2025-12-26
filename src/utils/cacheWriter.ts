@@ -3,28 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const cachePath = require('./cachePath');
 const db = require('./db');
-// PATCH 1️⃣ - Remover este import
-// const { variants } = require('./search');
-
-// PATCH 2️⃣ - Adicionar funções de normalização
-function normalizeTitle(title) {
-  return title
-    .toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/\([^)]*\)/g, '')
-    .replace(/\[[^\]]*\]/g, '')
-    .replace(/\bofficial\b/g, '')
-    .replace(/\bmusic\b/g, '')
-    .replace(/\bvideo\b/g, '')
-    .replace(/\bremastered\b/g, '')
-    .replace(/\blyrics?\b/g, '')
-    .replace(/\blive\b/g, '')
-    .replace(/\bhd\b/g, '')
-    .replace(/–|—/g, '-')
-    .replace(/[^a-z0-9\s-]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+const { normalizeTitle } = require('./textUtils'); // 🔥 FIX: Import shared utils
 
 function generateKeysFromTitle(title) {
   const clean = normalizeTitle(title);
@@ -75,7 +54,7 @@ function writeCache(videoId, title, stream, onFinish, streamUrl = null) {
       fs.renameSync(tempFile, file);
     } catch (err) {
       console.error('[CACHE] erro ao renomear arquivo:', err);
-      try { fs.unlinkSync(tempFile); } catch {}
+      try { fs.unlinkSync(tempFile); } catch { }
       onFinish?.();
       return;
     }

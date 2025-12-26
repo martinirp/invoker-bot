@@ -114,9 +114,17 @@ function updateSongFile(videoId, file) {
 }
 
 function updateSongBitrate(videoId, bitrate) {
-  db.prepare(`
-    UPDATE songs SET bitrate = ? WHERE videoId = ?
-  `).run(bitrate, videoId);
+  const stmt = db.prepare('UPDATE songs SET bitrate = ? WHERE videoId = ?');
+  stmt.run(bitrate, videoId);
+}
+
+// 🔥 FIX: Combined query to avoid redundant DB calls
+function getSongWithKeys(videoId) {
+  const song = getByVideoId(videoId);
+  if (!song) return null;
+
+  const keys = getKeysByVideoId(videoId);
+  return { song, keys };
 }
 
 // =========================
@@ -180,20 +188,17 @@ function clearSearchKeys() {
 }
 
 module.exports = {
+  getAllSongs,
+  getByVideoId,
   insertSong,
   insertKey,
   findByKey,
-  getByVideoId,
-  getAllSongs,
   getKeysByVideoId,
-  searchSongs,
-  deleteSong,
-  clearSearchKeys,
   updateSongFile,
-  updateSongMeta,
+  updateSongBitrate,
+  getSongWithKeys, // 🔥 FIX: Export new combined function
   markSongUpdated,
   isSongUpdated,
-  updateSongBitrate
+  deleteSong,
+  clearSearchKeys
 };
-
-
