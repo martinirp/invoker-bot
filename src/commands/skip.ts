@@ -22,6 +22,17 @@ async function execute(message) {
   const skippedTitle = g?.current?.title;
 
   // 🔥 delega totalmente ao QueueManager
+  // 🔥 SAFE SKIP LOGIC
+  const nextStatus = await queueManager.ensureNextReady(guildId, 15000); // Wait up to 15s
+
+  if (nextStatus === 'timeout') {
+    textChannel.send({ embeds: [createEmbed().setDescription('⚠️ A próxima música demorou para carregar, pulando mesmo assim...')] });
+  } else if (nextStatus === 'none') {
+    // Fila vazia, vai desconectar
+  } else {
+    // Ready!
+  }
+
   queueManager.skip(guildId);
 
   return textChannel.send({

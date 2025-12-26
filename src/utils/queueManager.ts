@@ -423,6 +423,39 @@ class QueueManager {
     }
   }
 
+
+
+  // 🔥 SAFE SKIP CHECK
+  async ensureNextReady(guildId: string, timeoutMs: number = 10000): Promise<'ready' | 'timeout' | 'none'> {
+    const g = this.get(guildId);
+    if (!g.queue.length) return 'none'; // Nada na fila
+
+    const nextSong = g.queue[0];
+    const filePath = nextSong.file || cachePath(nextSong.videoId);
+    const partPath = `${filePath}.part`;
+
+    // Se já existe e é válido, ok
+    if (fs.existsSync(filePath) && isValidOggOpus(filePath)) return 'ready';
+
+    // Se não está baixando, força
+    if (!fs.existsSync(partPath) && !fs.existsSync(filePath)) {
+      console.log(`[SAFE-SKIP] ${guildId} → Forçando download de ${nextSong.title}`);
+      downloadQueue.enqueue(guildId, nextSong);
+    }
+
+    console.log(`[SAFE-SKIP] ${guildId} → Aguardando próximo arquivo...`);
+    const start = Date.now();
+
+    while (Date.now() - start < timeoutMs) {
+      if ((fs.existsSync(filePath) && isValidOggOpus(filePath)) ||
+        (fs.existsSync(partPath) && fs.statSync(partPath).size > 64 * 1024)) { // Pelo menos 64kb de header
+        return 'ready';
+      }
+      await new Promise(r => setTimeout(r, 500));
+    }
+    return 'timeout';
+  }
+
   pause(guildId: string) {
     const g = this.guilds.get(guildId);
     if (!g?.player) return;
