@@ -497,7 +497,43 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
 // 🧾 REACTIONS (loop toggle via 🔁)
 // ===============================================
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
+  // Download command reactions (1️⃣, 2️⃣, 3️⃣)
+  if (['1️⃣', '2️⃣', '3️⃣'].includes(reaction.emoji.name)) {
+    const message = reaction.message;
+    if (!message || !message.guild) return;
+
+    // Verificar se é uma mensagem de download pendente
+    const downloadData = global.downloadPendingMessages?.get(message.id);
+    if (!downloadData) return; // Não é uma mensagem de download
+
+    // Verificar se é o autor correto
+    if (user.bot || user.id !== downloadData.authorId) {
+      try { await reaction.users.remove(user.id); } catch { }
+      return;
+    }
+
+    const idx = ['1️⃣', '2️⃣', '3️⃣'].indexOf(reaction.emoji.name);
+    const selected = downloadData.detailed[idx];
+
+    if (!selected) return;
+
+    // Limpar mensagem pendente
+    global.downloadPendingMessages.delete(message.id);
+
+    // Remover todas as reações
+    try { await message.reactions.removeAll(); } catch { }
+
+    // Executar download
+    const downloadCommand = client.commands.get('dl');
+    if (downloadCommand && downloadCommand.performDownload) {
+      await downloadCommand.performDownload(selected.videoId, selected.title, message.channel);
+    }
+
+    return;
+  }
+
   // Remove (❌, 1️⃣ a 🔟) — handler para remoção na fila
+
   if (reaction.emoji.name === '❌' || ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'].includes(reaction.emoji.name)) {
     const message = reaction.message;
     if (!message || !message.guild) return;
