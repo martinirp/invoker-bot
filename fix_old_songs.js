@@ -1,4 +1,4 @@
-// Script para corrigir músicas antigas no banco de dados
+// Script para corrigir músicas antigas no banco de dados (PARALELO)
 // Busca metadados do yt-dlp para músicas sem artist/track
 const Database = require('better-sqlite3');
 const path = require('path');
@@ -6,6 +6,8 @@ const { updateMetadataAsync } = require('./dist/utils/metadataFetcher');
 
 const dbPath = path.join(__dirname, 'dist', 'utils', 'music.db');
 const db = new Database(dbPath);
+
+const BATCH_SIZE = 10; // Processar 10 músicas em paralelo
 
 async function fixOldSongs() {
     console.log('🔧 Corrigindo músicas antigas no banco de dados...\n');
@@ -17,7 +19,8 @@ async function fixOldSongs() {
     WHERE artist IS NULL OR track IS NULL
   `).all();
 
-    console.log(`📊 Encontradas ${songsToFix.length} músicas para corrigir\n`);
+    console.log(`📊 Encontradas ${songsToFix.length} músicas para corrigir`);
+    console.log(`⚡ Processando ${BATCH_SIZE} músicas em paralelo\n`);
 
     if (songsToFix.length === 0) {
         console.log('✅ Todas as músicas já têm metadados!');
@@ -28,36 +31,62 @@ async function fixOldSongs() {
     let fixed = 0;
     let failed = 0;
 
-    for (let i = 0; i < songsToFix.length; i++) {
-        const song = songsToFix[i];
-        console.log(`\n[${i + 1}/${songsToFix.length}] Processando: ${song.title}`);
-        console.log(`   VideoId: ${song.videoId}`);
+    // Processar em batches de BATCH_SIZE
+    for (let i = 0; i < songsToFix.length; i += BATCH_SIZE) {
+        const batch = songsToFix.slice(i, i + BATCH_SIZE);
+        const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+        const totalBatches = Math.ceil(songsToFix.length / BATCH_SIZE);
 
-        try {
-            // Usar a função de atualização assíncrona
-            const result = await updateMetadataAsync(song.videoId);
+        console.log(`\n📦 Batch ${batchNum}/${totalBatches} (${batch.length} músicas)`);
+        console.log('─'.repeat(60));
 
-            if (result) {
-                console.log(`   ✅ Atualizado: ${result.artist} - ${result.track}`);
-                fixed++;
-            } else {
-                console.log(`   ⚠️  Não foi possível obter metadados`);
-                failed++;
+        // Processar batch em paralelo
+        const promises = batch.map(async (song, idx) => {
+            const globalIdx = i + idx + 1;
+            console.log(`[${globalIdx}/${songsToFix.length}] Processando: ${song.title.substring(0, 50)}...`);
+
+            try {
+                const result = await updateMetadataAsync(song.videoId);
+
+                if (result) {
+                    console.log(`   ✅ [${globalIdx}] ${result.artist} - ${result.track}`);
+                    return { success: true, song };
+                } else {
+                    console.log(`   ⚠️  [${globalIdx}] Não foi possível obter metadados`);
+                    return { success: false, song };
+                }
+            } catch (err) {
+                console.error(`   ❌ [${globalIdx}] Erro: ${err.message}`);
+                return { success: false, song, error: err.message };
             }
+        });
 
-            // Pequeno delay para não sobrecarregar o yt-dlp
-            await new Promise(resolve => setTimeout(resolve, 1000));
+        // Aguardar todas as músicas do batch
+        const results = await Promise.all(promises);
 
-        } catch (err) {
-            console.error(`   ❌ Erro: ${err.message}`);
-            failed++;
+        // Contar sucessos e falhas
+        const batchFixed = results.filter(r => r.success).length;
+        const batchFailed = results.filter(r => !r.success).length;
+
+        fixed += batchFixed;
+        failed += batchFailed;
+
+        console.log(`\n📊 Batch ${batchNum}: ✅ ${batchFixed} | ❌ ${batchFailed}`);
+
+        // Pequeno delay entre batches para não sobrecarregar
+        if (i + BATCH_SIZE < songsToFix.length) {
+            console.log('⏳ Aguardando 2s antes do próximo batch...');
+            await new Promise(resolve => setTimeout(resolve, 2000));
         }
     }
 
-    console.log(`\n\n📊 RESUMO FINAL:`);
+    console.log(`\n\n${'='.repeat(60)}`);
+    console.log(`📊 RESUMO FINAL:`);
     console.log(`   ✅ Corrigidas: ${fixed}`);
     console.log(`   ❌ Falharam: ${failed}`);
     console.log(`   📈 Total processadas: ${songsToFix.length}`);
+    console.log(`   🎯 Taxa de sucesso: ${Math.round((fixed / songsToFix.length) * 100)}%`);
+    console.log('='.repeat(60));
 
     db.close();
 }
