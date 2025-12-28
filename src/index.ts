@@ -499,15 +499,24 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
   // Download command reactions (1️⃣, 2️⃣, 3️⃣)
   if (['1️⃣', '2️⃣', '3️⃣'].includes(reaction.emoji.name)) {
+    console.log('[DOWNLOAD REACTION] Reação detectada:', reaction.emoji.name, 'por usuário:', user.id);
+
     const message = reaction.message;
-    if (!message || !message.guild) return;
+    if (!message || !message.guild) {
+      console.log('[DOWNLOAD REACTION] Mensagem ou guild inválida');
+      return;
+    }
 
     // Verificar se é uma mensagem de download pendente
     const downloadData = global.downloadPendingMessages?.get(message.id);
+    console.log('[DOWNLOAD REACTION] downloadData:', downloadData ? 'encontrado' : 'não encontrado');
+    console.log('[DOWNLOAD REACTION] global.downloadPendingMessages size:', global.downloadPendingMessages?.size || 0);
+
     if (!downloadData) return; // Não é uma mensagem de download
 
     // Verificar se é o autor correto
     if (user.bot || user.id !== downloadData.authorId) {
+      console.log('[DOWNLOAD REACTION] Usuário não autorizado ou é bot');
       try { await reaction.users.remove(user.id); } catch { }
       return;
     }
@@ -515,7 +524,12 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
     const idx = ['1️⃣', '2️⃣', '3️⃣'].indexOf(reaction.emoji.name);
     const selected = downloadData.detailed[idx];
 
-    if (!selected) return;
+    if (!selected) {
+      console.log('[DOWNLOAD REACTION] Seleção inválida, idx:', idx);
+      return;
+    }
+
+    console.log('[DOWNLOAD REACTION] Iniciando download de:', selected.title);
 
     // Limpar mensagem pendente
     global.downloadPendingMessages.delete(message.id);
@@ -527,6 +541,8 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
     const downloadCommand = client.commands.get('dl');
     if (downloadCommand && downloadCommand.performDownload) {
       await downloadCommand.performDownload(selected.videoId, selected.title, message.channel);
+    } else {
+      console.error('[DOWNLOAD REACTION] Comando download não encontrado ou performDownload não existe');
     }
 
     return;

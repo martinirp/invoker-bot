@@ -176,14 +176,19 @@ module.exports = {
           await searching.react(EMOJIS[i]);
         }
 
+        console.log('[DL] Armazenando mensagem de download:', searching.id, 'para autor:', message.author.id);
+
         // Armazenar mensagem para o handler de reações
         global.downloadPendingMessages.set(searching.id, {
           detailed,
           authorId: message.author.id
         });
 
+        console.log('[DL] Mensagem armazenada. Total de mensagens pendentes:', global.downloadPendingMessages.size);
+
         // Limpar após 30 segundos
         setTimeout(() => {
+          console.log('[DL] Limpando mensagem expirada:', searching.id);
           global.downloadPendingMessages.delete(searching.id);
         }, 30000);
       } catch (e) {
