@@ -7,7 +7,7 @@ const { updateMetadataAsync } = require('./dist/utils/metadataFetcher');
 const dbPath = path.join(__dirname, 'dist', 'utils', 'music.db');
 const db = new Database(dbPath);
 
-const BATCH_SIZE = 10; // Processar 10 músicas em paralelo
+const BATCH_SIZE = 50; // Processar 50 músicas em paralelo
 
 async function fixOldSongs() {
     console.log('🔧 Corrigindo músicas antigas no banco de dados...\n');
