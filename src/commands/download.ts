@@ -2,6 +2,7 @@
 const { runYtDlp } = require('../utils/ytDlp');
 const fs = require('fs');
 const path = require('path');
+const NodeID3 = require('node-id3');
 
 const { createEmbed } = require('../utils/embed');
 const { searchMultiple } = require('../utils/dibuiador');
@@ -71,16 +72,43 @@ async function performDownload(chosenVideoId, chosenTitle, textChannel) {
 
     // Buscar metadados para obter Artist e Track
     let finalFilename = chosenTitle || 'audio';
+    let metadataForTags = null;
 
     try {
       const metadata = await fetchMetadataAsync(chosenVideoId);
       if (metadata && metadata.artist && metadata.track) {
         finalFilename = `${metadata.artist} - ${metadata.track}`;
+        metadataForTags = metadata;
       } else if (metadata && metadata.title) {
         finalFilename = metadata.title;
+        metadataForTags = metadata;
       }
     } catch (metaErr) {
       console.warn('[DL] Erro ao buscar metadados, usando título padrão:', metaErr.message);
+    }
+
+    // =========================
+    // Escrever tags ID3 no arquivo MP3
+    // =========================
+    if (metadataForTags && fs.existsSync(filePath)) {
+      try {
+        const tags = {
+          title: metadataForTags.track || metadataForTags.title || finalFilename,
+          artist: metadataForTags.artist || metadataForTags.uploader || 'Unknown Artist',
+          album: metadataForTags.album || 'YouTube',
+        };
+
+        console.log('[DL] Escrevendo tags ID3:', tags);
+
+        const success = NodeID3.write(tags, filePath);
+        if (success) {
+          console.log('[DL] ✅ Tags ID3 escritas com sucesso');
+        } else {
+          console.warn('[DL] ⚠️ Falha ao escrever tags ID3');
+        }
+      } catch (id3Err) {
+        console.error('[DL] Erro ao escrever tags ID3:', id3Err.message);
+      }
     }
 
     await statusMsg.edit({

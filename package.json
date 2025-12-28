@@ -23,6 +23,7 @@
     "discord.js": "^14.25.1",
     "dotenv": "^16.6.1",
     "libsodium-wrappers": "^0.7.15",
+    "node-id3": "^0.2.9",
     "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
