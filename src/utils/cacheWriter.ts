@@ -62,9 +62,12 @@ function writeCache(videoId, title, stream, onFinish, streamUrl = null) {
     const keys = generateKeysFromTitle(title);
     keys.add(videoId);
 
+    // 🔥 NOVO: Salvar dados mínimos no banco (rápido, não bloqueia)
     db.insertSong({
       videoId,
       title,
+      artist: null,  // Será atualizado de forma assíncrona
+      track: null,   // Será atualizado de forma assíncrona
       file,
       streamUrl: streamUrl || null
     });
@@ -74,6 +77,13 @@ function writeCache(videoId, title, stream, onFinish, streamUrl = null) {
     }
 
     console.log(`[CACHE] finalizado: ${file}`);
+
+    // 🔥 NOVO: Buscar metadados de forma assíncrona (não bloqueia reprodução)
+    const { updateMetadataAsync } = require('./metadataFetcher');
+    updateMetadataAsync(videoId).catch(err => {
+      console.error('[METADATA] Erro na atualização assíncrona:', err);
+    });
+
     onFinish?.();
   });
 

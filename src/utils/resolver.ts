@@ -32,6 +32,18 @@ function buildVariants(query) {
 async function resolve(query) {
   console.log(`[RESOLVER] query recebida: "${query}"`);
 
+  // 🔥 NOVO: Busca inteligente por artist/track (PRIORIDADE MÁXIMA)
+  // Funciona independente da ordem: "avenged sevenfold afterlife" OU "afterlife avenged sevenfold"
+  const smartMatch = db.findByArtistTrack(query);
+  if (smartMatch) {
+    console.log(`[RESOLVER] 🎯 SMART HIT: ${smartMatch.artist} - ${smartMatch.track}`);
+    return {
+      fromCache: true,
+      videoId: smartMatch.videoId,
+      title: smartMatch.title
+    };
+  }
+
   // PATCH 2️⃣ - Tokenizar a query
   const queryTokens = tokenize(query);
 

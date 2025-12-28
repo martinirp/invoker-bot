@@ -12,6 +12,8 @@ export interface SongMetadata {
 export interface Song {
   videoId?: string;
   title: string;
+  artist?: string;  // 🔥 NOVO: Campo para artista (atualizado assincronamente)
+  track?: string;   // 🔥 NOVO: Campo para faixa (atualizado assincronamente)
   file?: string;
   streamUrl?: string;
   metadata?: SongMetadata;

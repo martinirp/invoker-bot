@@ -51,6 +51,52 @@ class QueueManager {
   constructor() {
     this.guilds = new Map();
     this.selfDisconnecting = new Set(); // Rastreia desconexões iniciadas pelo bot
+
+    // 🔥 NOVO: Listener para atualização assíncrona de metadados
+    const EventEmitter = require('events');
+    if (!global.metadataEmitter) {
+      global.metadataEmitter = new EventEmitter();
+    }
+
+    global.metadataEmitter.on('metadataUpdated', async (metadata: any) => {
+      // Iterar por todas as guilds para encontrar qual está tocando este vídeo
+      for (const [guildId, g] of this.guilds.entries()) {
+        if (!g.current || !g.nowPlayingMessage) continue;
+
+        // Verificar se o vídeo atualizado é o que está tocando
+        if (g.current.videoId === metadata.videoId) {
+          try {
+            // Atualizar dados da música atual
+            g.current.title = metadata.title;
+            g.current.artist = metadata.artist;
+            g.current.track = metadata.track;
+
+            // Atualizar embed no Discord
+            const loopOn = !!g.loop;
+            const autoOn = !!g.autoDJ;
+
+            const updatedData = {
+              ...g.current,
+              title: metadata.track || metadata.title,
+              artist: metadata.artist,
+              metadata: {
+                ...g.current.metadata,
+                artist: metadata.artist,
+                track: metadata.track,
+                album: metadata.album
+              }
+            };
+
+            const newEmbed = createSongEmbed(updatedData, 'playing', loopOn, autoOn);
+            await g.nowPlayingMessage.edit({ embeds: [newEmbed] });
+
+            console.log(`[DISCORD] ✅ Embed atualizado: ${metadata.artist} - ${metadata.track}`);
+          } catch (err) {
+            console.error(`[DISCORD] Erro ao atualizar embed para ${guildId}:`, err);
+          }
+        }
+      }
+    });
   }
 
   get(guildId: string): GuildState {
