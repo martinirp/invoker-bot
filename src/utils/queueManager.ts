@@ -421,7 +421,7 @@ class QueueManager {
           const newEmbed = createSongEmbed(baseSongData, 'playing', loopOn, autoOn);
           await existing.edit({ embeds: [newEmbed] }).catch(() => { });
           // Garante que as reações estejam presentes
-          const neededReactions = ['🔁', '🎶', '⏭️'];
+          const neededReactions = ['🔁', '🎶', '✨', '⏭️'];
           for (const emoji of neededReactions) {
             if (!existing.reactions.cache.has(emoji)) {
               try { await existing.react(emoji); } catch { }
@@ -437,6 +437,7 @@ class QueueManager {
           g.nowPlayingMessage = sent;
           try { await sent.react('🔁'); } catch { }
           try { await sent.react('🎶'); } catch { }
+          try { await sent.react('✨'); } catch { }
           try { await sent.react('⏭️'); } catch { } // Skip
         }
       }
@@ -598,19 +599,35 @@ class QueueManager {
   }
 
   checkIfAlone(guildId: string) {
-    const g = this.get(guildId);
+    const g = this.guilds.get(guildId);
     if (!g?.voiceChannel) return;
 
-    const members = g.voiceChannel.members.filter(m => !m.user.bot);
+    // Buscar o canal de voz atualizado da guild para ter contagem correta de membros
+    const voiceChannelId = g.voiceChannel.id;
+    const guild = g.voiceChannel.guild;
+    const freshChannel = guild?.channels?.cache?.get(voiceChannelId);
+
+    if (!freshChannel || !('members' in freshChannel)) {
+      console.log(`[CHECK ALONE] Canal de voz não encontrado ou inválido`);
+      return;
+    }
+
+    const members = freshChannel.members.filter(m => !m.user.bot);
+    console.log(`[CHECK ALONE] ${guildId} → ${members.size} membro(s) humano(s) no canal`);
 
     if (members.size === 0) {
+      console.log(`[CHECK ALONE] ${guildId} → Bot está sozinho, desconectando...`);
       this.selfDisconnecting.add(guildId);
+
+      // Enviar mensagem antes de resetar
+      const textChannel = g.textChannel;
+      if (textChannel) {
+        textChannel.send({
+          embeds: [createEmbed().setDescription('👋 Desconectado (sozinho no canal).')]
+        }).catch(() => { });
+      }
+
       this.resetGuild(guildId, { preserveSelfFlag: true });
-
-      g.textChannel?.send({
-        embeds: [createEmbed().setDescription('👋 Desconectado (sozinho no canal).')]
-      }).catch(() => { });
-
       setTimeout(() => this.selfDisconnecting.delete(guildId), 5000);
     }
   }
@@ -997,6 +1014,200 @@ class QueueManager {
       return [];
     }
   }
+
+  // Helper: Get artist top tracks from Last.FM for artist mix
+  async _getArtistMixFromLastFM(artistName: string, limit = 20) {
+    const LASTFM_API_KEY = process.env.LASTFM_API_KEY;
+    if (!LASTFM_API_KEY) throw new Error('Last.FM API key not set');
+
+    try {
+      const cleanArtist = String(artistName || '').replace(/\s+/g, ' ').trim();
+      console.log(`[ARTIST MIX] 🔍 Buscando top tracks de: "${cleanArtist}"`);
+
+      const url =
+        `https://ws.audioscrobbler.com/2.0/?` +
+        `method=artist.gettoptracks` +
+        `&artist=${encodeURIComponent(cleanArtist)}` +
+        `&limit=${limit}` +
+        `&api_key=${LASTFM_API_KEY}` +
+        `&format=json`;
+
+      console.log(`[ARTIST MIX] 📡 URL: ${url}`);
+
+      const res = await require('axios').get(url, { timeout: 5000 });
+      console.log(`[ARTIST MIX] ✅ Status: ${res.status}`);
+
+      let tracks = res.data?.toptracks?.track ?? [];
+      console.log(`[ARTIST MIX] 📋 Tracks recebidas:`, Array.isArray(tracks), typeof tracks, tracks.length || 'N/A');
+
+      // Garantir que é array
+      if (!Array.isArray(tracks)) {
+        console.log(`[ARTIST MIX] ⚠️ Convertendo objeto para array`);
+        tracks = tracks ? [tracks] : [];
+      }
+
+      console.log(`[ARTIST MIX] 📊 Total de tracks: ${tracks.length}`);
+
+      const result = tracks.map(t => {
+        const formatted = `${t.artist.name} - ${t.name}`;
+        console.log(`[ARTIST MIX] ✨ Formatado: "${formatted}"`);
+        return formatted;
+      });
+
+      console.log(`[ARTIST MIX] ✅ Retornando ${result.length} tracks do artista`);
+      return result;
+    } catch (err) {
+      console.error('[ARTIST MIX] ❌ Error:', err.message);
+      console.error('[ARTIST MIX] Stack:', err.stack);
+      return [];
+    }
+  }
+
+  // Create artist mix: fetch top tracks from same artist and add to queue
+  async createArtistMix(guildId: string) {
+    const g = this.get(guildId);
+    if (!g || !g.current) {
+      console.log('[ARTIST MIX] ⚠️ Sem música tocando');
+      return;
+    }
+
+    try {
+      // Extract artist from current song
+      const extracted = await this._extractArtistTrack(g.current);
+      const artistName = extracted.artist;
+
+      if (!artistName) {
+        console.log('[ARTIST MIX] ⚠️ Não conseguiu extrair artista da música atual');
+        g.textChannel?.send({
+          embeds: [
+            require('./embed').createEmbed()
+              .setDescription('❌ Não consegui identificar o artista desta música.')
+          ]
+        }).catch(() => { });
+        return;
+      }
+
+      console.log(`[ARTIST MIX] 🎨 Criando mix para artista: "${artistName}"`);
+
+      // Send initial feedback
+      const feedbackMsg = await g.textChannel?.send({
+        embeds: [
+          require('./embed').createEmbed()
+            .setDescription(`✨ Criando mix de **${artistName}**...`)
+        ]
+      }).catch(() => null);
+
+      // Fetch 20 top tracks from Last.fm
+      const tracks = await this._getArtistMixFromLastFM(artistName, 20);
+
+      if (!tracks || tracks.length === 0) {
+        console.log('[ARTIST MIX] ⚠️ Nenhuma track encontrada no Last.FM');
+        if (feedbackMsg) {
+          feedbackMsg.edit({
+            embeds: [
+              require('./embed').createEmbed()
+                .setDescription(`❌ Não encontrei músicas de **${artistName}** no Last.fm.`)
+            ]
+          }).catch(() => { });
+        }
+        return;
+      }
+
+      console.log(`[ARTIST MIX] 📦 Recebidas ${tracks.length} tracks, processando...`);
+
+      // Filter out current song
+      const currentTitleClean = this._cleanTitle(g.current.title || '').toLowerCase();
+      const filteredTracks = tracks.filter(track => {
+        const trackClean = this._cleanTitle(track).toLowerCase();
+        return trackClean !== currentTitleClean;
+      });
+
+      console.log(`[ARTIST MIX] 🔍 Após filtrar música atual: ${filteredTracks.length} tracks`);
+
+      // Select up to 10 tracks
+      const selectedTracks = filteredTracks.slice(0, 10);
+      console.log(`[ARTIST MIX] ✅ Selecionadas ${selectedTracks.length} tracks para adicionar`);
+
+      let added = 0;
+      const { resolve } = require('./resolver');
+
+      for (const track of selectedTracks) {
+        try {
+          console.log(`[ARTIST MIX] 🔎 Resolvendo: "${track}"`);
+          const resolved = await resolve(track);
+
+          if (!resolved || !resolved.videoId) {
+            console.log(`[ARTIST MIX] ⚠️ Não conseguiu resolver: "${track}"`);
+            continue;
+          }
+
+          // Check if already in queue or currently playing
+          if (resolved.videoId === g.current?.videoId) {
+            console.log(`[ARTIST MIX] ⏭️ Pulando (é a música atual)`);
+            continue;
+          }
+
+          if (g.queue.some(s => s.videoId === resolved.videoId)) {
+            console.log(`[ARTIST MIX] ⏭️ Pulando (já está na fila)`);
+            continue;
+          }
+
+          // Get from DB or create new song object
+          const dbSong = require('./db').getByVideoId(resolved.videoId);
+          const songObj = dbSong || {
+            videoId: resolved.videoId,
+            title: resolved.title || track,
+            metadata: resolved.metadata
+          };
+
+          // Add to queue
+          g.queue.push(songObj);
+          console.log(`[ARTIST MIX] ✅ Adicionado: "${songObj.title}"`);
+
+          // Enqueue download if not cached
+          const fs = require('fs');
+          const filePath = songObj.file || require('./cachePath')(resolved.videoId);
+          if (!fs.existsSync(filePath)) {
+            require('./downloadQueue').enqueue(guildId, songObj);
+          }
+
+          added++;
+        } catch (err) {
+          console.error(`[ARTIST MIX] ❌ Erro ao processar "${track}":`, err.message);
+        }
+      }
+
+      // Send final feedback
+      if (feedbackMsg) {
+        if (added > 0) {
+          feedbackMsg.edit({
+            embeds: [
+              require('./embed').createEmbed()
+                .setDescription(`✨ Mix de **${artistName}** criado!\n🎵 ${added} música${added > 1 ? 's' : ''} adicionada${added > 1 ? 's' : ''} à fila.`)
+            ]
+          }).catch(() => { });
+        } else {
+          feedbackMsg.edit({
+            embeds: [
+              require('./embed').createEmbed()
+                .setDescription(`❌ Não consegui adicionar músicas de **${artistName}** à fila.`)
+            ]
+          }).catch(() => { });
+        }
+      }
+
+      console.log(`[ARTIST MIX] 🎉 Mix criado com sucesso: ${added} músicas adicionadas`);
+    } catch (err) {
+      console.error('[ARTIST MIX] ❌ Erro geral:', err.message);
+      g.textChannel?.send({
+        embeds: [
+          require('./embed').createEmbed()
+            .setDescription('❌ Erro ao criar mix do artista.')
+        ]
+      }).catch(() => { });
+    }
+  }
+
 
   async _getRecommendationsFromGemini(musicTitle: string, limit = 5) {
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;

@@ -697,6 +697,20 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
       return;
     }
 
+    // Artist Mix (✨)
+    if (reaction.emoji.name === '✨') {
+      try {
+        console.log('[ARTIST MIX] ✨ Reação detectada, criando mix...');
+        await queueManager.createArtistMix(guildId);
+      } catch (e) {
+        console.error('[ARTIST MIX] erro ao criar mix:', e);
+      }
+
+      try { await reaction.users.remove(user.id); } catch { }
+
+      return;
+    }
+
     // Skip (⏭️) — duplicata do autoDJ
     if (reaction.emoji.name === '⏭️' || reaction.emoji.name === '⏭') {
       try {
