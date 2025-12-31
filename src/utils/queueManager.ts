@@ -421,7 +421,7 @@ class QueueManager {
           const newEmbed = createSongEmbed(baseSongData, 'playing', loopOn, autoOn);
           await existing.edit({ embeds: [newEmbed] }).catch(() => { });
           // Garante que as reações estejam presentes
-          const neededReactions = ['🔁', '🎶', '✨', '⏭️'];
+          const neededReactions = ['🔁', '🎶', '✨', '⏭️', '🇶'];
           for (const emoji of neededReactions) {
             if (!existing.reactions.cache.has(emoji)) {
               try { await existing.react(emoji); } catch { }
@@ -439,6 +439,7 @@ class QueueManager {
           try { await sent.react('🎶'); } catch { }
           try { await sent.react('✨'); } catch { }
           try { await sent.react('⏭️'); } catch { } // Skip
+          try { await sent.react('🇶'); } catch { } // Queue
         }
       }
 

@@ -730,6 +730,23 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
       // Não há ação extra como no autoDJ
       return;
     }
+
+    // Queue (🇶)
+    if (reaction.emoji.name === '🇶') {
+      try {
+        console.log('[QUEUE REACTION] 🇶 Reação detectada, mostrando fila...');
+        const queueCommand = client.commands.get('queue');
+        if (queueCommand) {
+          await queueCommand.execute(message);
+        }
+      } catch (e) {
+        console.error('[QUEUE REACTION] erro ao mostrar fila:', e);
+      }
+
+      try { await reaction.users.remove(user.id); } catch { }
+
+      return;
+    }
   } catch (e) {
     console.error('[REACTION] erro ao processar reação:', e);
   }
