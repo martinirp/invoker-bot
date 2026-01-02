@@ -12,6 +12,7 @@
 const db = require('./db');
 const { searchYouTube, searchYouTubeMultiple, getVideoDetails } = require('./youtubeApi');
 const { runYtDlp } = require('./ytDlp');
+const { shouldKeepVideo } = require('./coverFilter');
 const axios = require('axios');
 
 // ⚡ Cache em memória (persistente, sem TTL)
@@ -136,6 +137,14 @@ async function fastResolve(query, includeMetadata = false) {
 
     if (stdout && stdout.trim()) {
       const [videoId, title] = stdout.trim().split('|||');
+
+      // Verifica se deve manter este vídeo (filtra covers não solicitados)
+      const video = { videoId, title };
+      if (!shouldKeepVideo(video, query)) {
+        console.log(`[FAST-RESOLVE] ❌ Vídeo filtrado (cover não solicitado)`);
+        return null;
+      }
+
       const result = {
         fromCache: false,
         videoId,
@@ -166,7 +175,7 @@ async function getLastFMTrackName(query) {
   try {
     const url = `https://ws.audioscrobbler.com/2.0/?method=track.search&track=${encodeURIComponent(query)}&limit=1&api_key=${LASTFM_API_KEY}&format=json`;
     const res = await axios.get(url, { timeout: 3000 });
-    
+
     const track = res.data?.results?.trackmatches?.track?.[0];
     if (track && track.name && track.artist) {
       return `${track.artist.name || track.artist} - ${track.name}`;

@@ -3,6 +3,7 @@ const db = require('./db');
 const { runYtDlp } = require('./ytDlp');
 const { searchYouTube, getVideoDetails, searchYouTubeMultiple } = require('./youtubeApi');
 const { normalize, tokenize } = require('./textUtils'); // 🔥 FIX: Import shared utils
+const { shouldKeepVideo } = require('./coverFilter');
 
 // =========================
 // VARIANTS
@@ -150,6 +151,14 @@ async function resolve(query) {
 
         videoId = parts[0].trim();
         title = parts[1].trim();
+
+        // Verifica se deve manter este vídeo (filtra covers não solicitados)
+        const video = { videoId, title };
+        if (!shouldKeepVideo(video, query)) {
+          console.log(`[RESOLVER] ❌ Vídeo filtrado (cover não solicitado)`);
+          throw new Error('Vídeo filtrado: cover não solicitado');
+        }
+
         metadata = { source: 'yt-dlp' };
 
         console.log(`[RESOLVER] yt-dlp resolveu → ${videoId} (${title})`);

@@ -1,6 +1,7 @@
 // @ts-nocheck
 const axios = require('axios');
 const { runYtDlp } = require('./ytDlp');
+const { shouldKeepVideo, filterCovers } = require('./coverFilter');
 
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
 const API_BASE = 'https://www.googleapis.com/youtube/v3';
@@ -31,16 +32,20 @@ async function ytSearchBasic(query, count = 1) {
       '--skip-download',
       '--no-playlist',
       '--no-warnings',
-      '--extractor-retries','1',
-      '--socket-timeout','5',
-      '--print','%(id)s|||%(title)s|||%(uploader)s|||%(thumbnail)s'
+      '--extractor-retries', '1',
+      '--socket-timeout', '5',
+      '--print', '%(id)s|||%(title)s|||%(uploader)s|||%(thumbnail)s'
     ];
     const { stdout } = await runYtDlp(args);
     const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
-    const results = lines.map(l => {
+    let results = lines.map(l => {
       const [id, title, uploader, thumb] = l.split('|||');
       return { videoId: id, title, channel: uploader || '', thumbnail: thumb || '', channelId: '' };
     });
+
+    // Filtra covers não solicitados
+    results = filterCovers(results, query);
+
     return results.length ? results : null;
   } catch (err) {
     console.error('[YT-DLP] Erro search:', err.message);
@@ -120,7 +125,7 @@ async function getVideoDetailsYtDlp(videoId) {
       '--skip-download',
       '--no-playlist',
       '--no-warnings',
-      '--print','%(title)s|||%(uploader)s|||%(duration_string)s|||%(thumbnail)s'
+      '--print', '%(title)s|||%(uploader)s|||%(duration_string)s|||%(thumbnail)s'
     ];
     const { stdout } = await runYtDlp(args);
     const [title, uploader, duration, thumb] = (stdout.trim().split('|||')).map(s => s || '');
@@ -180,10 +185,10 @@ async function getPlaylistItems(playlistId, maxResults = 100) {
       });
 
       const items = response.data.items || [];
-      
+
       for (const item of items) {
         if (videos.length >= maxResults) break;
-        
+
         // Filtrar vídeos deletados/privados
         if (item.snippet.title === 'Private video' || item.snippet.title === 'Deleted video') {
           continue;
@@ -214,7 +219,7 @@ async function getPlaylistItems(playlistId, maxResults = 100) {
       console.error('[YOUTUBE API] Erro ao buscar playlist:', error.message);
     }
     // Fallback: Piped
-    try { return await getPlaylistItemsPiped(playlistId, maxResults); } catch {}
+    try { return await getPlaylistItemsPiped(playlistId, maxResults); } catch { }
     return null;
   }
 }
@@ -292,12 +297,17 @@ async function searchYouTubeMultiple(query, maxResults = 5) {
 
     if (!response.data.items || response.data.items.length === 0) return null;
 
-    return response.data.items.map(item => ({
+    let results = response.data.items.map(item => ({
       videoId: item.id.videoId,
       title: item.snippet.title,
       channel: item.snippet.channelTitle,
       thumbnail: item.snippet.thumbnails.default?.url
     }));
+
+    // Filtra covers não solicitados
+    results = filterCovers(results, query);
+
+    return results.length > 0 ? results : null;
   } catch (error) {
     try {
       const status = error?.response?.status;
