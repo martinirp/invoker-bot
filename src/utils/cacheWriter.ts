@@ -48,6 +48,26 @@ function writeCache(videoId, title, stream, onFinish, streamUrl = null) {
   out.on('finish', () => {
     completed = true;
 
+    // 🔥 FIX: Validate file size before renaming
+    let stats;
+    try {
+      stats = fs.statSync(tempFile);
+    } catch (err) {
+      console.error('[CACHE] erro ao verificar arquivo:', err);
+      try { fs.unlinkSync(tempFile); } catch { }
+      onFinish?.();
+      return;
+    }
+
+    if (stats.size === 0) {
+      console.error('[CACHE] ❌ arquivo vazio detectado, descartando:', tempFile);
+      try { fs.unlinkSync(tempFile); } catch { }
+      onFinish?.();
+      return;
+    }
+
+    console.log(`[CACHE] arquivo válido (${stats.size} bytes), renomeando...`);
+
     // move .part → final para evitar cache corrompido
     try {
       console.log(`[CACHE] renomeando .part → final: ${tempFile} -> ${file}`);

@@ -67,7 +67,7 @@ function startCacheMonitor() {
           if (!fs.existsSync(abs)) {
             broken++;
             if (fix) {
-              try { removeSongCompletely(s.videoId); removed++; } catch (e) {}
+              try { removeSongCompletely(s.videoId); removed++; } catch (e) { }
             }
             continue;
           }
@@ -80,11 +80,25 @@ function startCacheMonitor() {
             continue;
           }
 
+          // 🔥 FIX: Check for 0-byte files (corrupted downloads)
+          if (stats.size === 0) {
+            console.warn(`[CACHE MONITOR] arquivo vazio detectado: ${abs}`);
+            broken++;
+            if (fix) {
+              try {
+                fs.unlinkSync(abs);
+                removeSongCompletely(s.videoId);
+                removed++;
+              } catch (e) { }
+            }
+            continue;
+          }
+
           const valid = isValidOggOpus(abs);
           if (!valid) {
             broken++;
             if (fix) {
-              try { removeSongCompletely(s.videoId); removed++; } catch (e) {}
+              try { removeSongCompletely(s.videoId); removed++; } catch (e) { }
             }
           }
           checked++;

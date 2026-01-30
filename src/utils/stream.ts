@@ -7,113 +7,113 @@ function createOpusStream(videoId) {
 }
 
 function createOpusStreamFromUrl(url) {
-  const bitrateK = (() => {
-    const v = parseInt(process.env.OPUS_BITRATE_K || '96', 10);
-    if (Number.isNaN(v)) return 96;
-    return Math.min(512, Math.max(16, v));
-  })();
-  const compLevel = (() => {
-    const v = parseInt(process.env.OPUS_COMPRESSION_LEVEL || '10', 10);
-    if (Number.isNaN(v)) return 10;
-    return Math.min(10, Math.max(0, v));
-  })();
-
-  console.log(`[STREAM] ffmpeg opus settings: bitrate=${bitrateK}k compression=${compLevel}`);
+  console.log(`[STREAM] iniciando download via yt-dlp (file-based)`);
 
   const { getCookieArgs } = require('./ytDlp');
   const cookieArgs = getCookieArgs();
 
-  // 🔥 Optimization: Add buffer-size and cookies to yt-dlp
+  // 🔥 YouTube 403 Fix: Download to file instead of streaming to stdout
+  // YouTube blocks stdout streaming (-o -) but allows file downloads
+  // This matches the working 'dl' command approach
+  const fs = require('fs');
+  const path = require('path');
+  const cachePath = require('./cachePath');
+
+  // Generate temporary file path
+  const tempId = url.includes('watch?v=') ? url.split('watch?v=')[1].split('&')[0] : 'temp';
+  const outputFile = cachePath(tempId);
+  const outputDir = path.dirname(outputFile);
+
+  // Ensure directory exists
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+
   const ytdlpArgs = [
     ...cookieArgs,
-    '-f', 'bestaudio',
-    '--buffer-size', '1M',
+    '-x',  // Extract audio
+    '--audio-format', 'opus',  // Convert to Opus (Discord-compatible)
     '--no-playlist',
-    '-o', '-',
+    '-o', outputFile,
     url
   ];
 
+  // Spawn yt-dlp to download file
+  console.log(`[STREAM] comando: yt-dlp ${ytdlpArgs.join(' ')}`);
   const ytdlp = spawn('yt-dlp', ytdlpArgs, {
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
-  const ffmpeg = spawn('ffmpeg', [
-    '-loglevel', 'quiet',
-    '-i', 'pipe:0',
-    '-f', 'ogg',
-    '-acodec', 'libopus',
-    '-b:a', `${bitrateK}k`,
-    '-compression_level', String(compLevel),
-    'pipe:1'
-  ], {
-    stdio: ['pipe', 'pipe', 'ignore']
-  });
+  // Track download progress and errors
+  let ytdlpFailed = false;
+  let ytdlpError = null;
+  let downloadComplete = false;
 
-  // 🔥 FIX: Add error handler for ffmpeg.stdin to catch EPIPE (broken pipe)
-  ffmpeg.stdin.on('error', err => {
-    if ((err as any).code === 'EPIPE') {
-      // Ignorar silenciosamente erro de pipe quebrado ao fechar
-      return;
+  // Monitor yt-dlp exit
+  ytdlp.on('close', (code) => {
+    if (code !== 0) {
+      ytdlpFailed = true;
+      ytdlpError = new Error(`yt-dlp failed with exit code ${code}`);
+      console.error(`[STREAM] yt-dlp falhou com código ${code}`);
+    } else {
+      downloadComplete = true;
+      console.log(`[STREAM] download concluído: ${outputFile}`);
     }
-    console.error('[STREAM] ffmpeg.stdin erro:', err?.message || err);
   });
 
-  // Conectar pipeline de forma explícita
-  ytdlp.stdout.pipe(ffmpeg.stdin);
-
-  // Propagar erros do pipeline (sem causar exceções no consumidor)
   ytdlp.on('error', err => {
+    ytdlpFailed = true;
+    ytdlpError = err;
     console.error('[STREAM] yt-dlp erro:', err?.message || err);
-    try { ffmpeg.stdin.end(); } catch { }
   });
 
-  // Capture yt-dlp stderr for debugging
+  // Capture stderr for debugging and error detection
   ytdlp.stderr.on('data', chunk => {
     const msg = chunk.toString();
-    // Ignorar warnings comuns para não poluir
-    if (msg.includes('warning') || msg.includes('WARNING')) return;
-    console.error(`[STREAM][yt-dlp-err] ${msg.trim()}`);
-  });
+    // Log everything for debugging
+    console.log(`[STREAM][yt-dlp] ${msg.trim()}`);
 
-  ffmpeg.on('error', err => {
-    console.error('[STREAM] ffmpeg erro:', err?.message || err);
-  });
-
-  // Passar stream diretamente sem buffer estratégico
-  const { PassThrough } = require('stream');
-  const bufferedStream = new PassThrough();
-
-  ffmpeg.stdout.on('data', chunk => {
-    // Respeitar backpressure: pausar leitura se necessário
-    if (!bufferedStream.push(chunk)) {
-      try { ffmpeg.stdout.pause(); } catch { }
-      bufferedStream.once('drain', () => {
-        try { ffmpeg.stdout.resume(); } catch { }
-      });
+    if (msg.includes('HTTP Error 403')) {
+      ytdlpFailed = true;
+      ytdlpError = new Error('YouTube blocked download (HTTP 403 Forbidden)');
+      console.error('[STREAM] ❌ YouTube bloqueou download (403)');
     }
   });
 
-  ffmpeg.stdout.on('end', () => {
-    console.log('[STREAM] stream finalizado normalmente');
-    bufferedStream.end();
-  });
-  ffmpeg.stdout.on('close', () => {
-    try { bufferedStream.end(); } catch { }
-  });
-  ffmpeg.stdout.on('error', err => {
-    console.error('[STREAM] stdout erro:', err?.message || err);
-    try { bufferedStream.end(); } catch { }
-  });
+  // Return a PassThrough stream that will pipe the file once download completes
+  const { PassThrough } = require('stream');
+  const outputStream = new PassThrough();
 
-  // Encerramento coordenado dos processos quando o consumidor termina
-  const cleanup = () => {
+  // Wait for download to complete, then stream the file
+  const checkAndStream = setInterval(() => {
+    if (ytdlpFailed) {
+      clearInterval(checkAndStream);
+      outputStream.destroy(ytdlpError || new Error('Download failed'));
+      return;
+    }
+
+    if (downloadComplete && fs.existsSync(outputFile)) {
+      clearInterval(checkAndStream);
+
+      // Stream the downloaded file
+      const fileStream = fs.createReadStream(outputFile);
+      fileStream.on('error', err => {
+        console.error('[STREAM] erro ao ler arquivo:', err);
+        outputStream.destroy(err);
+      });
+
+      fileStream.pipe(outputStream);
+      console.log('[STREAM] streaming do arquivo baixado');
+    }
+  }, 100);
+
+  // Cleanup on stream close
+  outputStream.on('close', () => {
+    clearInterval(checkAndStream);
     try { ytdlp.kill('SIGKILL'); } catch { }
-    try { ffmpeg.kill('SIGKILL'); } catch { }
-  };
-  bufferedStream.on('close', cleanup);
-  bufferedStream.on('end', cleanup);
+  });
 
-  return bufferedStream;
+  return outputStream;
 }
 
 module.exports = { createOpusStream, createOpusStreamFromUrl };
