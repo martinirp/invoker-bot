@@ -1,0 +1,209 @@
+// @ts-nocheck
+const db = require('./db');
+const { runYtDlp } = require('./ytDlp');
+const { searchYouTube, getVideoDetails, searchYouTubeMultiple } = require('./youtubeApi');
+const { normalize, tokenize } = require('./textUtils'); // 🔥 FIX: Import shared utils
+const { shouldKeepVideo } = require('./coverFilter');
+
+// =========================
+// VARIANTS
+// =========================
+function buildVariants(query) {
+  const normalized = normalize(query);
+  const words = normalized.split(' ');
+  const variants = new Set();
+
+  // Sempre adicionar query normalizada completa
+  variants.add(normalized);
+
+  // Se tiver 2+ palavras, adicionar inversão simples (artista-música)
+  if (words.length >= 2) {
+    const half = Math.floor(words.length / 2);
+    const part1 = words.slice(0, half).join(' ');
+    const part2 = words.slice(half).join(' ');
+    variants.add(`${part2} ${part1}`);
+  }
+
+  return [...variants];
+}
+
+// =========================
+// RESOLVE
+// =========================
+async function resolve(query) {
+  console.log(`[RESOLVER] query recebida: "${query}"`);
+
+  // 🔥 NOVO: Busca inteligente por artist/track (PRIORIDADE MÁXIMA)
+  // Funciona independente da ordem: "avenged sevenfold afterlife" OU "afterlife avenged sevenfold"
+  const smartMatch = db.findByArtistTrack(query);
+  if (smartMatch) {
+    console.log(`[RESOLVER] 🎯 SMART HIT: ${smartMatch.artist} - ${smartMatch.track}`);
+    return {
+      fromCache: true,
+      videoId: smartMatch.videoId,
+      title: smartMatch.title
+    };
+  }
+
+  // PATCH 2️⃣ - Tokenizar a query
+  const queryTokens = tokenize(query);
+
+  const variants = buildVariants(query);
+
+  console.log('[RESOLVER] variants da query:', variants);
+
+  // =========================
+  // 🔎 BUSCA NO BANCO
+  // =========================
+  // PATCH 3️⃣ - Loop de busca com validação forte
+  for (const key of variants) {
+    const hit = db.findByKey(key);
+    if (!hit) continue;
+
+    // 🔥 FIX: Use combined query instead of 2 separate calls
+    const result = db.getSongWithKeys(hit.videoId);
+    if (!result) continue;
+
+    const { song, keys: songKeys } = result;
+    const songKeyText = songKeys.join(' ');
+
+    const valid = queryTokens.every(t => songKeyText.includes(t));
+    if (!valid) continue;
+
+    console.log(`[RESOLVER] cache HIT (validado) → ${hit.videoId}`);
+
+    // 🔒 aprendizado CONTROLADO (sem poluir)
+    for (const v of variants) {
+      db.insertKey(v, hit.videoId);
+    }
+
+    db.insertKey(hit.videoId, hit.videoId);
+
+    return {
+      fromCache: true,
+      videoId: hit.videoId,
+      title: song.title
+    };
+  }
+
+  // =========================
+  // 🔍 FALLBACK LOCAL (ANAGRAMA / KEYWORDS)
+  // =========================
+  const keywords = query.split(' ').filter(w => w.length > 2).map(w => w.toLowerCase());
+
+  if (keywords.length > 0) {
+    const localHit = db.searchSongsByKeywords(keywords);
+
+    if (localHit) {
+      console.log(`[RESOLVER] KEYWORD HIT: ${localHit.title} (${localHit.videoId})`);
+
+      // Auto-learn
+      db.insertKey(query, localHit.videoId);
+
+      return {
+        fromCache: true,
+        videoId: localHit.videoId,
+        title: localHit.title
+      };
+    }
+  }
+
+  // =========================
+  // ❌ CACHE MISS → YouTube API (rápido) ou yt-dlp (fallback)
+  // =========================
+  console.log('[RESOLVER] cache MISS → tentando YouTube API');
+
+  let videoId, title, metadata = null;
+
+  // Tentar YouTube API primeiro (rápido) com fallback Piped
+  const apiResult = await searchYouTube(query);
+  if (apiResult) {
+    videoId = apiResult.videoId;
+    title = apiResult.title;
+    metadata = {
+      channel: apiResult.channel,
+      thumbnail: apiResult.thumbnail,
+      channelId: apiResult.channelId
+    };
+
+    // Buscar detalhes completos (duração, views)
+    const details = await getVideoDetails(videoId);
+    if (details) {
+      metadata = { ...metadata, ...details };
+    }
+
+    console.log(`[RESOLVER] YouTube API resolveu → ${videoId}`);
+  } else {
+    // Tentar busca múltipla via API/Piped antes de chamar yt-dlp
+    const multi = await searchYouTubeMultiple(query, 3);
+    if (multi && multi.length) {
+      const top = multi[0];
+      videoId = top.videoId;
+      title = top.title;
+      metadata = { channel: top.channel, thumbnail: top.thumbnail };
+
+      // Buscar detalhes se possível
+      const details = await getVideoDetails(videoId);
+      if (details) metadata = { ...metadata, ...details };
+
+      console.log(`[RESOLVER] Fallback API/Piped resolveu → ${videoId}`);
+    } else {
+      // Fallback: yt-dlp com flags de otimização
+      console.log('[RESOLVER] API/Piped indisponível → fallback yt-dlp');
+      try {
+        const args = [
+          `ytsearch1:${query}`,
+          '--skip-download',
+          '--no-playlist',
+          '--no-warnings',
+          '--extractor-retries', '1',
+          '--socket-timeout', '5',
+          '--print', '%(id)s|||%(title)s'
+        ];
+        const { stdout } = await runYtDlp(args);
+
+        if (!stdout) {
+          throw new Error('yt-dlp não retornou resultado');
+        }
+
+        const parts = stdout.trim().split('|||');
+        if (parts.length < 2) {
+          throw new Error('yt-dlp retornou formato inválido');
+        }
+
+        videoId = parts[0].trim();
+        title = parts[1].trim();
+
+        // Verifica se deve manter este vídeo (filtra covers não solicitados)
+        const video = { videoId, title };
+        if (!shouldKeepVideo(video, query)) {
+          console.log(`[RESOLVER] ❌ Vídeo filtrado (cover não solicitado)`);
+          throw new Error('Vídeo filtrado: cover não solicitado');
+        }
+
+        metadata = { source: 'yt-dlp' };
+
+        console.log(`[RESOLVER] yt-dlp resolveu → ${videoId} (${title})`);
+      } catch (ytdlpErr) {
+        console.error(`[RESOLVER] yt-dlp falhou: ${ytdlpErr.message}`);
+        throw ytdlpErr;
+      }
+    }
+  }
+
+  for (const v of variants) {
+    db.insertKey(v, videoId);
+  }
+
+  db.insertKey(videoId, videoId);
+
+  return {
+    fromCache: false,
+    videoId,
+    title,
+    metadata
+  };
+}
+
+module.exports = { resolve, normalize, tokenize };
+
