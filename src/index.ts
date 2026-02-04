@@ -1,3 +1,4 @@
+
 // ===============================================
 // 🐛 DEBUG EMBED
 // ===============================================
@@ -126,15 +127,19 @@ const cachePath = require('./utils/cachePath');
 const queueManager = require('./utils/queueManager');
 const { createEmbed, createSongEmbed } = require('./utils/embed');
 const { resolve } = require('./utils/resolver');
-const { ActionRowBuilder, ButtonBuilder } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const { Worker } = require('worker_threads'); // Integration: Worker
 const { removeSongCompletely } = require('./utils/removeSong');
 const { startCacheMonitor } = require('./utils/cacheMonitor');
+const { LootSplitter } = require('./utils/lootSplitter');
 
 // ===============================================
 // 💬 Último canal de texto por guild
 // ===============================================
 const lastTextChannel = new Map();
+
+// Loot Splitter State Map: MessageID -> { originalLog, players[] }
+const lootSessionMap = new Map();
 
 // Mapeia mensagens geradas para comandos externos (!p) → query
 const externalPMap = new Map();
@@ -192,9 +197,9 @@ console.log(`✅ Comandos carregados: ${client.commands.size}`);
 client.once(Events.ClientReady, c => {
   console.log(`✅ Bot online como ${c.user.tag}`);
   // iniciar monitor de cache assíncrono (não bloqueante)
-  // try { startCacheMonitor(); } catch (e) {
-  //   console.error('[CACHE MONITOR] erro ao iniciar:', e.message);
-  // }
+  try { startCacheMonitor(); } catch (e) {
+    console.error('[CACHE MONITOR] erro ao iniciar:', e.message);
+  }
 });
 
 // ===============================================
@@ -204,16 +209,58 @@ client.on(Events.MessageCreate, async message => {
   if (!message.guild) return;
 
   // ===============================================
-  // 🕵️ MONITORAMENTO CANAL LOOT
+  // 🕵️ LOOT SPLITTER MONITOR
   // ===============================================
+  // Canal fixo: 1467419860727234611
   if (message.channel.id === '1467419860727234611' && !message.author.bot) {
-    try {
-      // Resposta automática mencionando o usuário
-      await message.reply({
-        content: `👀 Olá <@${message.author.id}>, estou monitorando este canal!`
-      });
-    } catch (e) {
-      console.error('[LOOT MONITOR] Erro ao responder:', e);
+    const content = message.content;
+
+    if (LootSplitter.isValidLog(content)) {
+      try {
+        const players = LootSplitter.parsePlayers(content);
+        const result = LootSplitter.calculate(players);
+
+        let desc = `**Session:** ${LootSplitter.findSessionDate(content)} (${LootSplitter.findSessionDuration(content)})\n` +
+          `**Total Profit:** ${result.formatted.totalProfit}\n` +
+          `**Per Person:** ${result.formatted.profitPerPerson}\n\n` +
+          `**Transfers:**\n`;
+
+        if (result.transfers.length === 0) {
+          desc += "Nenhuma transferência necessária.";
+        } else {
+          result.transfers.forEach(t => {
+            desc += `🔹 **${t.from}** pays **${LootSplitter.formatNumber(t.amount)}** to **${t.to}**\n`;
+          });
+        }
+
+        const embed = createEmbed()
+          .setTitle('💰 Tibia Loot Splitter')
+          .setDescription(desc)
+          .setColor(result.totalProfit >= 0 ? 0x00FF00 : 0xFF0000);
+
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('loot_btn_regular').setLabel('Regular Split').setStyle(1), // Primary
+          new ButtonBuilder().setCustomId('loot_btn_extra').setLabel('Extra Expenses').setStyle(2), // Secondary
+          new ButtonBuilder().setCustomId('loot_btn_remove').setLabel('Remove Players').setStyle(4) // Danger
+        );
+
+        const replyMsg = await message.reply({ embeds: [embed], components: [row] });
+
+        // Salvar estado para interações futuras
+        lootSessionMap.set(replyMsg.id, {
+          originalLog: content,
+          players: players,
+          lastResult: result
+        });
+
+        // Limpar memória após 1 hora
+        setTimeout(() => lootSessionMap.delete(replyMsg.id), 3600000);
+
+        return; // Parar processamento de outros comandos
+      } catch (e) {
+        console.error('[LOOT SPLITTER] Erro ao processar:', e);
+        // Não responder erro para não spammar se for apenas chat normal
+      }
     }
   }
 
@@ -260,20 +307,6 @@ client.on(Events.MessageCreate, async message => {
     console.error('[EXTERNAL !p] erro ao processar mensagem:', e);
   }
 
-  // ===============================================
-  // 🕵️ MONITORAMENTO CANAL LOOT
-  // ===============================================
-  if (message.channel.id === '1467419860727234611' && !message.author.bot) {
-    try {
-      // Resposta automática mencionando o usuário
-      await message.reply({
-        content: `👀 Olá <@${message.author.id}>, estou monitorando este canal!`
-      });
-    } catch (e) {
-      console.error('[LOOT MONITOR] Erro ao responder:', e);
-    }
-  }
-
   // Ignorar mensagens de bot para execução de comandos normais
   if (message.author.bot) return;
 
@@ -306,6 +339,167 @@ client.on(Events.MessageCreate, async message => {
 // ===============================================
 client.on(Events.InteractionCreate, async interaction => {
   try {
+    // ===============================================
+    // 💰 LOOT SPLITTER INTERACTIONS
+    // ===============================================
+
+    // Helper (Defined here for scope access, though reusing across events is better)
+    const updateLootMessage = async (interaction, result, originalMessage = null) => {
+      let desc = `**Session:** ${LootSplitter.findSessionDate(result.sessionDate || '')} (${result.sessionDuration || LootSplitter.findSessionDuration('')})\n` +
+        `**Total Profit:** ${result.formatted.totalProfit}\n` +
+        `**Per Person:** ${result.formatted.profitPerPerson}\n\n` +
+        `**Transfers:**\n`;
+
+      if (result.transfers.length === 0) {
+        desc += "Nenhuma transferência necessária.";
+      } else {
+        result.transfers.forEach(t => {
+          desc += `🔹 **${t.from}** pays **${LootSplitter.formatNumber(t.amount)}** to **${t.to}**\n`;
+        });
+      }
+
+      const embed = createEmbed()
+        .setTitle('💰 Tibia Loot Splitter')
+        .setDescription(desc)
+        .setColor(result.totalProfit >= 0 ? 0x00FF00 : 0xFF0000);
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('loot_btn_regular').setLabel('Regular Split').setStyle(1),
+        new ButtonBuilder().setCustomId('loot_btn_extra').setLabel('Extra Expenses').setStyle(2),
+        new ButtonBuilder().setCustomId('loot_btn_remove').setLabel('Remove Players').setStyle(4)
+      );
+
+      if (originalMessage) {
+        await originalMessage.edit({ embeds: [embed], components: [row] });
+      } else {
+        await interaction.update({ embeds: [embed], components: [row] });
+      }
+    };
+
+    if (interaction.isButton() && interaction.customId.startsWith('loot_btn_')) {
+      const messageId = interaction.message.id;
+      const session = lootSessionMap.get(messageId);
+
+      if (!session) {
+        return interaction.reply({ content: '❌ Sessão expirada ou não encontrada.', ephemeral: true });
+      }
+
+      if (interaction.customId === 'loot_btn_regular') {
+        session.players = LootSplitter.parsePlayers(session.originalLog); // Reset
+        const result = LootSplitter.calculate(session.players);
+        session.lastResult = result;
+        return updateLootMessage(interaction, result);
+      }
+
+      if (interaction.customId === 'loot_btn_remove') {
+        const options = session.players.map(p => ({
+          label: p.name,
+          value: p.name,
+          default: p.isRemoved === true
+        }));
+
+        const row = new ActionRowBuilder().addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId(`loot_select_remove_${messageId}`)
+            .setPlaceholder('Selecione quem NÃO participou')
+            .setMinValues(0)
+            .setMaxValues(options.length)
+            .addOptions(options)
+        );
+
+        return interaction.reply({ content: 'Marque os jogadores para **REMOVER** da conta:', components: [row], ephemeral: true });
+      }
+
+      if (interaction.customId === 'loot_btn_extra') {
+        const options = session.players.map(p => ({
+          label: p.name,
+          value: p.name
+        }));
+
+        const row = new ActionRowBuilder().addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId(`loot_select_extra_player_${messageId}`)
+            .setPlaceholder('Quem teve gasto extra?')
+            .addOptions(options)
+        );
+
+        return interaction.reply({ content: 'Selecione o jogador:', components: [row], ephemeral: true });
+      }
+    }
+
+    if (interaction.isStringSelectMenu()) {
+      if (interaction.customId.startsWith('loot_select_remove_')) {
+        const messageId = interaction.customId.replace('loot_select_remove_', '');
+        const session = lootSessionMap.get(messageId);
+        if (!session) return interaction.reply({ content: '❌ Sessão expirada.', ephemeral: true });
+
+        const removedPlayers = interaction.values;
+        session.players.forEach(p => {
+          p.isRemoved = removedPlayers.includes(p.name);
+        });
+
+        const result = LootSplitter.calculate(session.players);
+        session.lastResult = result;
+
+        try {
+          const msg = await interaction.guild.channels.cache.get(interaction.channelId).messages.fetch(messageId);
+          await updateLootMessage(interaction, result, msg);
+          return interaction.reply({ content: '✅ Lista atualizada!', ephemeral: true });
+        } catch (err) {
+          return interaction.reply({ content: '❌ Erro ao atualizar mensagem original.', ephemeral: true });
+        }
+      }
+
+      if (interaction.customId.startsWith('loot_select_extra_player_')) {
+        const messageId = interaction.customId.replace('loot_select_extra_player_', '');
+        const playerSelected = interaction.values[0];
+
+        const modal = new ModalBuilder()
+          .setCustomId(`loot_modal_extra_${messageId}_${playerSelected}`)
+          .setTitle(`Gastos: ${playerSelected}`);
+
+        const goldInput = new TextInputBuilder()
+          .setCustomId('extra_gold')
+          .setLabel("Valor do Gasto (Gold)")
+          .setStyle(TextInputStyle.Short)
+          .setPlaceholder('Ex: 50000')
+          .setRequired(true);
+
+        modal.addComponents(new ActionRowBuilder().addComponents(goldInput));
+        return interaction.showModal(modal);
+      }
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('loot_modal_extra_')) {
+      const prefix = 'loot_modal_extra_';
+      const rest = interaction.customId.substring(prefix.length);
+      const firstUnderscore = rest.indexOf('_');
+      const messageId = rest.substring(0, firstUnderscore);
+      const playerName = rest.substring(firstUnderscore + 1);
+
+      const session = lootSessionMap.get(messageId);
+      if (!session) return interaction.reply({ content: '❌ Sessão expirada.', ephemeral: true });
+
+      const gold = parseInt(interaction.fields.getTextInputValue('extra_gold') || '0', 10);
+
+      const p = session.players.find(p => p.name === playerName);
+      if (p) {
+        // Accumulate expenses
+        p.extraExpenses = (p.extraExpenses || 0) + gold;
+      }
+
+      const result = LootSplitter.calculate(session.players);
+      session.lastResult = result;
+
+      try {
+        const msg = await interaction.guild.channels.cache.get(interaction.channelId).messages.fetch(messageId);
+        await updateLootMessage(interaction, result, msg);
+        return interaction.reply({ content: `✅ Gasto de ${gold} gp adicionado a ${playerName}`, ephemeral: true });
+      } catch (err) {
+        return interaction.reply({ content: '❌ Erro ao atualizar.', ephemeral: true });
+      }
+    }
+
     if (interaction.isButton() && interaction.customId === 'lib_search') {
       return interaction.showModal({
         title: 'Buscar música',
@@ -435,6 +629,7 @@ client.on(Events.InteractionCreate, async interaction => {
         return interaction.followUp({ content: '❌ Erro ao processar a query.', ephemeral: true });
       }
     }
+
   } catch (e) {
     console.error('❌ Erro em InteractionCreate:', e);
     if (!interaction.replied) {
@@ -526,43 +721,53 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
   // Download command reactions (1️⃣, 2️⃣, 3️⃣)
   if (['1️⃣', '2️⃣', '3️⃣'].includes(reaction.emoji.name)) {
-    const downloadData = global.downloadPendingMessages?.get(reaction.message.id);
+    console.log('[DOWNLOAD REACTION] Reação detectada:', reaction.emoji.name, 'por usuário:', user.id);
 
-    // SÓ processa aqui se realmente for uma mensagem de download pendente
-    if (downloadData) {
-      console.log('[DOWNLOAD REACTION] Reação detectada:', reaction.emoji.name, 'por usuário:', user.id);
-
-      const message = reaction.message;
-      if (!message || !message.guild) return;
-
-      // Verificar se é o autor correto
-      if (user.bot || user.id !== downloadData.authorId) {
-        console.log('[DOWNLOAD REACTION] Usuário não autorizado ou é bot');
-        try { await reaction.users.remove(user.id); } catch { }
-        return;
-      }
-
-      const idx = ['1️⃣', '2️⃣', '3️⃣'].indexOf(reaction.emoji.name);
-      const selected = downloadData.detailed[idx];
-
-      if (!selected) return;
-
-      console.log('[DOWNLOAD REACTION] Iniciando download de:', selected.title);
-
-      // Limpar mensagem pendente
-      global.downloadPendingMessages.delete(message.id);
-
-      // Remover todas as reações
-      try { await message.reactions.removeAll(); } catch { }
-
-      // Executar download
-      const downloadCommand = client.commands.get('dl');
-      if (downloadCommand && downloadCommand.performDownload) {
-        await downloadCommand.performDownload(selected.videoId, selected.title, message.channel);
-      }
-      return; // Ação processada, sai da função
+    const message = reaction.message;
+    if (!message || !message.guild) {
+      console.log('[DOWNLOAD REACTION] Mensagem ou guild inválida');
+      return;
     }
-    // Se não for downloadData, CONTINUA para baixo para o handler da fila
+
+    // Verificar se é uma mensagem de download pendente
+    const downloadData = global.downloadPendingMessages?.get(message.id);
+    console.log('[DOWNLOAD REACTION] downloadData:', downloadData ? 'encontrado' : 'não encontrado');
+    console.log('[DOWNLOAD REACTION] global.downloadPendingMessages size:', global.downloadPendingMessages?.size || 0);
+
+    if (!downloadData) return; // Não é uma mensagem de download
+
+    // Verificar se é o autor correto
+    if (user.bot || user.id !== downloadData.authorId) {
+      console.log('[DOWNLOAD REACTION] Usuário não autorizado ou é bot');
+      try { await reaction.users.remove(user.id); } catch { }
+      return;
+    }
+
+    const idx = ['1️⃣', '2️⃣', '3️⃣'].indexOf(reaction.emoji.name);
+    const selected = downloadData.detailed[idx];
+
+    if (!selected) {
+      console.log('[DOWNLOAD REACTION] Seleção inválida, idx:', idx);
+      return;
+    }
+
+    console.log('[DOWNLOAD REACTION] Iniciando download de:', selected.title);
+
+    // Limpar mensagem pendente
+    global.downloadPendingMessages.delete(message.id);
+
+    // Remover todas as reações
+    try { await message.reactions.removeAll(); } catch { }
+
+    // Executar download
+    const downloadCommand = client.commands.get('dl');
+    if (downloadCommand && downloadCommand.performDownload) {
+      await downloadCommand.performDownload(selected.videoId, selected.title, message.channel);
+    } else {
+      console.error('[DOWNLOAD REACTION] Comando download não encontrado ou performDownload não existe');
+    }
+
+    return;
   }
 
   // Remove (❌, 1️⃣ a 🔟) — handler para remoção na fila
@@ -595,21 +800,23 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
     let idx = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'].indexOf(reaction.emoji.name);
     if (idx >= 0 && idx < g.queue.length) {
       const removed = g.queue.splice(idx, 1)[0];
-      const removeUserReaction = reaction.users.remove(user.id).catch(() => { });
+      try { await reaction.users.remove(user.id); } catch { }
 
       // RECONSTRUIR EMBED ATUALIZADO
-      // Simplificado para garantir atualização imediata
       const queueSlice = g.queue.slice(0, 10);
+      const durations = await Promise.all(queueSlice.map(async song => {
+        if (song.duration) return song.duration;
+        if (song.metadata?.duration) return song.metadata.duration;
+        // Não buscar na API aqui para ser rápido na interação UI
+        return null;
+      }));
 
       let accumulatedSeconds = 0;
       const list = queueSlice.map((s, i) => {
-        // Usa duração já salva ou 0 se não tiver (evita atraso de API)
-        const duration = s.duration || s.metadata?.duration;
+        const duration = durations[i];
         const durationSeconds = durationToSeconds(duration);
-
         const timeUntil = accumulatedSeconds > 0 ? ` • Em ${secondsToDuration(accumulatedSeconds)}` : '';
         const durationDisplay = duration ? ` [${duration}]` : '';
-
         accumulatedSeconds += durationSeconds;
         return `${i + 1}. ${s.title}${durationDisplay}${timeUntil}`;
       }).join('\n');
@@ -631,28 +838,21 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
         updatedEmbed.setFooter({ text: `+ ${g.queue.length - 10} música(s) na fila` });
       }
 
-      // Executa edição e remoção de reação em paralelo para ser mais rápido
-      const editMessage = message.edit({ embeds: [updatedEmbed] }).catch(err => console.error('[QUEUE] Erro edit:', err));
+      try { await message.edit({ embeds: [updatedEmbed] }); } catch { }
 
-      await Promise.all([removeUserReaction, editMessage]);
-
-      // REMOVER REAÇÕES EXCEDENTES (em background, sem await)
+      // REMOVER REAÇÕES EXCEDENTES
       const EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
       // Se fila tem tamanho 2, deve ter reações 0 e 1. A partir do index 2 (g.queue.length), remover.
-      if (g.queue.length < EMOJIS.length) {
-        (async () => {
-          for (let i = g.queue.length; i < EMOJIS.length; i++) {
-            const emojiToRemove = EMOJIS[i];
-            const reactionToRemove = message.reactions.cache.find(r => r.emoji.name === emojiToRemove);
-            if (reactionToRemove) {
-              try { await reactionToRemove.remove(); } catch { }
-            }
-          }
-        })();
+      for (let i = g.queue.length; i < EMOJIS.length; i++) {
+        const emojiToRemove = EMOJIS[i];
+        const reactionToRemove = message.reactions.cache.find(r => r.emoji.name === emojiToRemove);
+        if (reactionToRemove) {
+          try { await reactionToRemove.remove(); } catch { }
+        }
       }
     }
     if (reaction.emoji.name === '❌') {
-      message.delete().catch(() => { }); // Sem await para ser instantâneo
+      try { await message.delete(); } catch { }
     }
     return;
   }
@@ -778,4 +978,3 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
 // 🚀 LOGIN
 // ===============================================
 client.login(token);
-
