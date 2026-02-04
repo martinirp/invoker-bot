@@ -220,17 +220,27 @@ client.on(Events.MessageCreate, async message => {
         const players = LootSplitter.parsePlayers(content);
         const result = LootSplitter.calculate(players);
 
-        let desc = `**Session:** ${LootSplitter.findSessionDate(content)} (${LootSplitter.findSessionDuration(content)})\n` +
+        const sessionDuration = LootSplitter.findSessionDuration(content);
+        const profitPerHour = LootSplitter.calculateProfitPerHour(result.profitPerPerson, sessionDuration);
+        const damageSplit = LootSplitter.calculateDamageSplit(players);
+
+        let desc = `**Session:** ${LootSplitter.findSessionDate(content)} (${sessionDuration})\n` +
           `**Total Profit:** ${result.formatted.totalProfit}\n` +
-          `**Per Person:** ${result.formatted.profitPerPerson}\n\n` +
+          `**Per Person:** ${result.formatted.profitPerPerson}\n` +
+          `**Profit/Hr:** ${profitPerHour} for each player\n\n` +
           `**Transfers:**\n`;
 
         if (result.transfers.length === 0) {
-          desc += "Nenhuma transferência necessária.";
+          desc += "Nenhuma transferência necessária.\n";
         } else {
           result.transfers.forEach(t => {
-            desc += `🔹 **${t.from}** pays **${LootSplitter.formatNumber(t.amount)}** to **${t.to}**\n`;
+            const formattedAmount = LootSplitter.formatNumber(t.amount);
+            desc += `🔹 **${t.from}** to pay **${formattedAmount}** to **${t.to}**\n\`\`\`text\ntransfer ${t.amount} to ${t.to}\`\`\`\n`;
           });
+        }
+
+        if (damageSplit) {
+          desc += `\n**Damage Split:** ${damageSplit}`;
         }
 
         const embed = createEmbed()
@@ -239,18 +249,18 @@ client.on(Events.MessageCreate, async message => {
           .setColor(result.totalProfit >= 0 ? 0x00FF00 : 0xFF0000);
 
         const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('loot_btn_regular').setLabel('Regular Split').setStyle(1), // Primary
           new ButtonBuilder().setCustomId('loot_btn_extra').setLabel('Extra Expenses').setStyle(2), // Secondary
           new ButtonBuilder().setCustomId('loot_btn_remove').setLabel('Remove Players').setStyle(4) // Danger
         );
 
-        const replyMsg = await message.reply({ embeds: [embed], components: [row] });
+        const replyMsg = await message.channel.send({ embeds: [embed], components: [row] });
 
         // Salvar estado para interações futuras
         lootSessionMap.set(replyMsg.id, {
           originalLog: content,
           players: players,
-          lastResult: result
+          lastResult: result,
+          history: [] // Init History
         });
 
         // Limpar memória após 1 hora
@@ -354,19 +364,45 @@ client.on(Events.InteractionCreate, async interaction => {
     // 💰 LOOT SPLITTER INTERACTIONS
     // ===============================================
 
-    // Helper (Defined here for scope access, though reusing across events is better)
+    // Helper (Defined here for scope access)
     const updateLootMessage = async (interaction, result, originalMessage = null) => {
-      let desc = `**Session:** ${LootSplitter.findSessionDate(result.sessionDate || '')} (${result.sessionDuration || LootSplitter.findSessionDuration('')})\n` +
+      const session = lootSessionMap.get(interaction.message?.id || originalMessage?.id);
+      const logForDate = session?.originalLog || "";
+
+      const sessionDuration = LootSplitter.findSessionDuration(logForDate);
+      const profitPerHour = LootSplitter.calculateProfitPerHour(result.profitPerPerson, sessionDuration);
+      const damageSplit = LootSplitter.calculateDamageSplit(session?.players || []);
+
+      // Build Per Person list with IDs
+      let perPersonList = "";
+      session?.players.forEach((p, index) => {
+        const balance = p.balance || 0;
+        const sign = balance >= 0 ? "+" : "";
+        perPersonList += `**${index + 1}. ${p.name}:** ${sign}${LootSplitter.formatNumber(balance)}\n`;
+      });
+
+      let desc = `**Session:** ${LootSplitter.findSessionDate(logForDate)} (${sessionDuration})\n` +
         `**Total Profit:** ${result.formatted.totalProfit}\n` +
-        `**Per Person:** ${result.formatted.profitPerPerson}\n\n` +
+        `**Profit/Hr:** ${profitPerHour} per person\n\n` +
+        `**Balance by Player (ID):**\n${perPersonList}\n` +
         `**Transfers:**\n`;
 
       if (result.transfers.length === 0) {
-        desc += "Nenhuma transferência necessária.";
+        desc += "Nenhuma transferência necessária.\n";
       } else {
         result.transfers.forEach(t => {
-          desc += `🔹 **${t.from}** pays **${LootSplitter.formatNumber(t.amount)}** to **${t.to}**\n`;
+          const formattedAmount = LootSplitter.formatNumber(t.amount);
+          desc += `🔹 **${t.from}** to pay **${formattedAmount}** to **${t.to}**\n\`\`\`text\ntransfer ${t.amount} to ${t.to}\`\`\`\n`;
         });
+      }
+
+      if (damageSplit) {
+        desc += `\n**Damage Split:** ${damageSplit}`;
+      }
+
+      // SHOW HISTORY LOG
+      if (session && session.history && session.history.length > 0) {
+        desc += `\n\n**Action Log:**\n` + session.history.join('\n');
       }
 
       const embed = createEmbed()
@@ -375,7 +411,6 @@ client.on(Events.InteractionCreate, async interaction => {
         .setColor(result.totalProfit >= 0 ? 0x00FF00 : 0xFF0000);
 
       const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('loot_btn_regular').setLabel('Regular Split').setStyle(1),
         new ButtonBuilder().setCustomId('loot_btn_extra').setLabel('Extra Expenses').setStyle(2),
         new ButtonBuilder().setCustomId('loot_btn_remove').setLabel('Remove Players').setStyle(4)
       );
@@ -395,119 +430,161 @@ client.on(Events.InteractionCreate, async interaction => {
         return interaction.reply({ content: '❌ Sessão expirada ou não encontrada.', ephemeral: true });
       }
 
-      if (interaction.customId === 'loot_btn_regular') {
-        session.players = LootSplitter.parsePlayers(session.originalLog); // Reset
-        const result = LootSplitter.calculate(session.players);
-        session.lastResult = result;
-        return updateLootMessage(interaction, result);
-      }
-
       if (interaction.customId === 'loot_btn_remove') {
-        const options = session.players.map(p => ({
-          label: p.name,
-          value: p.name,
-          default: p.isRemoved === true
-        }));
+        // Direct Modal for Removing Players (Toggle)
+        const modal = new ModalBuilder()
+          .setCustomId(`loot_modal_remove_${messageId}`)
+          .setTitle('Remover/Adicionar Jogadores');
 
-        const row = new ActionRowBuilder().addComponents(
-          new StringSelectMenuBuilder()
-            .setCustomId(`loot_select_remove_${messageId}`)
-            .setPlaceholder('Selecione quem NÃO participou')
-            .setMinValues(0)
-            .setMaxValues(options.length)
-            .addOptions(options)
-        );
+        const legend = session.players.map((p, i) => `${i + 1} = ${p.name}`).join(', ');
+        const placeholderRaw = legend; // Clean format
+        const placeholder = placeholderRaw.length > 100
+          ? placeholderRaw.substring(0, 97) + '...'
+          : placeholderRaw;
 
-        return interaction.reply({ content: 'Marque os jogadores para **REMOVER** da conta:', components: [row], ephemeral: true });
+        const removeInput = new TextInputBuilder()
+          .setCustomId('remove_identifiers')
+          .setLabel("IDs para Remover/Add (Separar por vírgula)")
+          .setStyle(TextInputStyle.Paragraph)
+          .setPlaceholder(placeholder)
+          .setRequired(true);
+
+        modal.addComponents(new ActionRowBuilder().addComponents(removeInput));
+        return interaction.showModal(modal);
       }
 
       if (interaction.customId === 'loot_btn_extra') {
-        const options = session.players.map(p => ({
-          label: p.name,
-          value: p.name
-        }));
+        // Direct Modal for Extra Expenses with ID support
+        const modal = new ModalBuilder()
+          .setCustomId(`loot_modal_direct_extra_${messageId}`)
+          .setTitle('Adicionar Gasto Extra');
 
-        const row = new ActionRowBuilder().addComponents(
-          new StringSelectMenuBuilder()
-            .setCustomId(`loot_select_extra_player_${messageId}`)
-            .setPlaceholder('Quem teve gasto extra?')
-            .addOptions(options)
+        // Generate dynamic legend for placeholder (max 100 chars)
+        const legend = session.players.map((p, i) => `${i + 1} = ${p.name}`).join(', ');
+        const placeholderRaw = legend;
+        const placeholder = placeholderRaw.length > 100
+          ? placeholderRaw.substring(0, 97) + '...'
+          : placeholderRaw;
+
+        const idInput = new TextInputBuilder()
+          .setCustomId('extra_identifier')
+          .setLabel("Nome ou Número (ID)")
+          .setStyle(TextInputStyle.Paragraph) // TextArea
+          .setPlaceholder(placeholder)
+          .setRequired(true);
+
+        const goldInput = new TextInputBuilder()
+          .setCustomId('extra_gold')
+          .setLabel("Valor (Gold)")
+          .setStyle(TextInputStyle.Short)
+          .setPlaceholder('Ex: 50000')
+          .setRequired(true);
+
+        modal.addComponents(
+          new ActionRowBuilder().addComponents(idInput),
+          new ActionRowBuilder().addComponents(goldInput)
         );
 
-        return interaction.reply({ content: 'Selecione o jogador:', components: [row], ephemeral: true });
+        return interaction.showModal(modal);
       }
     }
 
     if (interaction.isStringSelectMenu()) {
       if (interaction.customId.startsWith('loot_select_remove_')) {
-        const messageId = interaction.customId.replace('loot_select_remove_', '');
-        const session = lootSessionMap.get(messageId);
-        if (!session) return interaction.reply({ content: '❌ Sessão expirada.', ephemeral: true });
-
-        const removedPlayers = interaction.values;
-        session.players.forEach(p => {
-          p.isRemoved = removedPlayers.includes(p.name);
-        });
-
-        const result = LootSplitter.calculate(session.players);
-        session.lastResult = result;
-
-        try {
-          const msg = await interaction.guild.channels.cache.get(interaction.channelId).messages.fetch(messageId);
-          await updateLootMessage(interaction, result, msg);
-          return interaction.reply({ content: '✅ Lista atualizada!', ephemeral: true });
-        } catch (err) {
-          return interaction.reply({ content: '❌ Erro ao atualizar mensagem original.', ephemeral: true });
-        }
-      }
-
-      if (interaction.customId.startsWith('loot_select_extra_player_')) {
-        const messageId = interaction.customId.replace('loot_select_extra_player_', '');
-        const playerSelected = interaction.values[0];
-
-        const modal = new ModalBuilder()
-          .setCustomId(`loot_modal_extra_${messageId}_${playerSelected}`)
-          .setTitle(`Gastos: ${playerSelected}`);
-
-        const goldInput = new TextInputBuilder()
-          .setCustomId('extra_gold')
-          .setLabel("Valor do Gasto (Gold)")
-          .setStyle(TextInputStyle.Short)
-          .setPlaceholder('Ex: 50000')
-          .setRequired(true);
-
-        modal.addComponents(new ActionRowBuilder().addComponents(goldInput));
-        return interaction.showModal(modal);
+        // Deprecated, but keeping fallback or just removing block content?
+        // Since we changed the button, this won't be triggered anymore.
+        // I will return empty or error.
+        return interaction.deferUpdate();
       }
     }
 
-    if (interaction.isModalSubmit() && interaction.customId.startsWith('loot_modal_extra_')) {
-      const prefix = 'loot_modal_extra_';
-      const rest = interaction.customId.substring(prefix.length);
-      const firstUnderscore = rest.indexOf('_');
-      const messageId = rest.substring(0, firstUnderscore);
-      const playerName = rest.substring(firstUnderscore + 1);
+    if (interaction.isModalSubmit()) {
+      if (interaction.customId.startsWith('loot_modal_remove_')) {
+        const messageId = interaction.customId.replace('loot_modal_remove_', '');
+        const session = lootSessionMap.get(messageId);
+        if (!session) return interaction.reply({ content: '❌ Sessão expirada.', ephemeral: true });
 
-      const session = lootSessionMap.get(messageId);
-      if (!session) return interaction.reply({ content: '❌ Sessão expirada.', ephemeral: true });
+        const inputRaw = interaction.fields.getTextInputValue('remove_identifiers');
+        const tokens = inputRaw.split(/[\n,]+/).map(t => t.trim()).filter(t => t);
 
-      const gold = parseInt(interaction.fields.getTextInputValue('extra_gold') || '0', 10);
+        const changes = [];
 
-      const p = session.players.find(p => p.name === playerName);
-      if (p) {
-        // Accumulate expenses
-        p.extraExpenses = (p.extraExpenses || 0) + gold;
+        tokens.forEach(token => {
+          let p;
+          if (/^\d+$/.test(token)) {
+            const index = parseInt(token, 10);
+            if (index > 0 && index <= session.players.length) {
+              p = session.players[index - 1];
+            }
+          } else {
+            p = session.players.find(pl => pl.name.toLowerCase() === token.toLowerCase());
+          }
+
+          if (p) {
+            const wasRemoved = p.isRemoved || false;
+            p.isRemoved = !wasRemoved; // Toggle
+
+            if (p.isRemoved) changes.push(`🚫 Removed **${p.name}**`);
+            else changes.push(`✅ Added back **${p.name}**`);
+          }
+        });
+
+        if (changes.length > 0) {
+          if (!session.history) session.history = [];
+          session.history.push(...changes);
+
+          const result = LootSplitter.calculate(session.players);
+          session.lastResult = result;
+
+          try {
+            const msg = await interaction.guild.channels.cache.get(interaction.channelId).messages.fetch(messageId);
+            await updateLootMessage(interaction, result, msg);
+          } catch (e) { console.error(e); }
+        }
+
+        return interaction.deferUpdate();
       }
 
-      const result = LootSplitter.calculate(session.players);
-      session.lastResult = result;
+      if (interaction.customId.startsWith('loot_modal_direct_extra_')) {
+        const messageId = interaction.customId.replace('loot_modal_direct_extra_', '');
+        const session = lootSessionMap.get(messageId);
+        if (!session) return interaction.reply({ content: '❌ Sessão expirada.', ephemeral: true });
 
-      try {
-        const msg = await interaction.guild.channels.cache.get(interaction.channelId).messages.fetch(messageId);
-        await updateLootMessage(interaction, result, msg);
-        return interaction.reply({ content: `✅ Gasto de ${gold} gp adicionado a ${playerName}`, ephemeral: true });
-      } catch (err) {
-        return interaction.reply({ content: '❌ Erro ao atualizar.', ephemeral: true });
+        const identifier = interaction.fields.getTextInputValue('extra_identifier').trim();
+        const gold = parseInt(interaction.fields.getTextInputValue('extra_gold') || '0', 10);
+
+        let p;
+        // Check if identifier is a number
+        if (/^\d+$/.test(identifier)) {
+          const index = parseInt(identifier, 10);
+          if (index > 0 && index <= session.players.length) {
+            p = session.players[index - 1];
+          }
+        } else {
+          // Fuzzy match name
+          p = session.players.find(p => p.name.toLowerCase() === identifier.toLowerCase());
+        }
+
+        if (p) {
+          // Accumulate expenses
+          p.extraExpenses = (p.extraExpenses || 0) + gold;
+
+          if (!session.history) session.history = [];
+          session.history.push(`💸 Added **${LootSplitter.formatNumber(gold)}** expense to **${p.name}**`);
+
+          const result = LootSplitter.calculate(session.players);
+          session.lastResult = result;
+
+          try {
+            const msg = await interaction.guild.channels.cache.get(interaction.channelId).messages.fetch(messageId);
+            await updateLootMessage(interaction, result, msg);
+            return interaction.deferUpdate();
+          } catch (err) {
+            return interaction.reply({ content: '❌ Erro ao atualizar.', ephemeral: true });
+          }
+        } else {
+          return interaction.reply({ content: `❌ Jogador "${identifier}" não encontrado (use ID ou Nome Exato).`, ephemeral: true });
+        }
       }
     }
 
@@ -527,6 +604,7 @@ client.on(Events.InteractionCreate, async interaction => {
         }]
       });
     }
+
 
     if (interaction.isModalSubmit() && interaction.customId === 'lib_search_modal') {
       const query = interaction.fields.getTextInputValue('query');
@@ -640,7 +718,6 @@ client.on(Events.InteractionCreate, async interaction => {
         return interaction.followUp({ content: '❌ Erro ao processar a query.', ephemeral: true });
       }
     }
-
   } catch (e) {
     console.error('❌ Erro em InteractionCreate:', e);
     if (!interaction.replied) {
@@ -648,6 +725,7 @@ client.on(Events.InteractionCreate, async interaction => {
     }
   }
 });
+
 
 // ===============================================
 // 🔊 VOICE STATE (MUTE / UNMUTE / KICK)
