@@ -261,6 +261,17 @@ client.on(Events.MessageCreate, async message => {
         console.error('[LOOT SPLITTER] Erro ao processar:', e);
         // Não responder erro para não spammar se for apenas chat normal
       }
+    } else {
+      // ❌ Log Inválido (Regra estrita do canal)
+      try {
+        const reply = await message.reply('esse party hunt ai tá errado');
+        setTimeout(() => {
+          message.delete().catch(() => { }); // Deleta mensagem do user
+          reply.delete().catch(() => { });   // Deleta resposta do bot
+        }, 5000);
+      } catch (e) {
+        console.error('[LOOT CLEANUP] Erro ao deletar:', e);
+      }
     }
   }
 
