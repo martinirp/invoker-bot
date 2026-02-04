@@ -31,6 +31,7 @@ export interface SplitResult {
 
 export class LootSplitter {
     /**
+     * Core logic for parsing and calculating loot splits.
      * Validates if the text looks like a valid Tibia Party Hunt Analyser log
      */
     static isValidLog(text: string): boolean {
@@ -63,90 +64,106 @@ export class LootSplitter {
     }
 
     /**
-     * Parses the raw log into a list of PlayerData objects
-     */
+   * Parses the raw log into a list of PlayerData objects
+   */
     static parsePlayers(data: string): PlayerData[] {
-        // 1. Remove header until first "Balance:" to clean up Leader/Session info
-        // But we need to keep the structure. The original code does:
-        // remove_first_section -> removes the Total Balance line to avoid confusion.
+        const players: PlayerData[] = [];
 
-        let workingData = data;
+        // Normalize line endings
+        const lines = data.split(/\r?\n/);
 
-        // Remove the Total Balance/Loot/Supplies section usually at the top
-        // "Balance: 1,234,567 Loot: ..." (The aggregate)
-        const firstBalance = workingData.indexOf("Balance: ");
-        if (firstBalance !== -1) {
-            const rest = workingData.substring(firstBalance + 9);
-            const spaceIndex = rest.indexOf(" ");
-            const totalBalanceDuration = rest.substring(0, spaceIndex); // e.g., "1,200,000"
+        // Find where the global session info ends
+        // Usually extracting everything after the first "Balance:" block which is global
+        // But logs have "Loot Type:", "Supplies:", "Balance:" at top.
 
-            // We skip this first section to avoid counting it as a player
-            // The original code logic for 'remove_first_section'
-            const sub1 = workingData.substring(firstBalance + 9);
-            const index2 = sub1.indexOf(" ");
-            const sub2 = sub1.substring(0, index2);
-            workingData = sub1.substring(sub2.length + 1);
+        let buffer: string[] = [];
+        let processingPlayers = false;
+
+        // Strategy: Iterate lines. 
+        // If line starts with "Loot Type:" or "Session:" or "From ", it's header.
+        // The Global Balance line usually looks like "Balance: 15,272,040" (no indentation or start of line)
+        // Players start AFTER the global Balance line.
+
+        let headerBalanceFound = false;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i]; // Keep original for indentation check?
+            const trimmed = line.trim();
+
+            if (!trimmed) continue;
+
+            // Check for global balance to start player processing
+            // Global stats usually come in a block. The last one is Balance.
+            // After that, player names appear.
+            if (!processingPlayers) {
+                if (trimmed.startsWith("Balance:") && !headerBalanceFound) {
+                    headerBalanceFound = true;
+                    processingPlayers = true;
+                }
+                continue;
+            }
+
+            // We are in player section.
+            // Player name is a line that does NOT start with reserved keywords (Loot, Supplies, Balance, Damage, Healing, Upgrading...)
+            // AND is likely followed by "Loot:" indented line?
+            // Actually, looking at the log:
+            // "Ginn Ho"
+            // "\tLoot: ..."
+
+            // So if a line does NOT have "Loot:", "Balance:", "Supplies:", "Damage:", "Healing:" keywords, it's a name.
+            const isStatLine = /^(Loot|Supplies|Balance|Damage|Healing|Upgrading)/.test(trimmed);
+
+            if (!isStatLine) {
+                // It's a new player!
+                // Parse the PREVIOUS player if exists in buffer
+                if (buffer.length > 0) {
+                    players.push(this.parseSinglePlayerBlock(buffer));
+                    buffer = [];
+                }
+                buffer.push(trimmed); // Name
+            } else {
+                // It's a stat line for current player
+                buffer.push(trimmed);
+            }
         }
 
-        // Now workingData contains the list of players
-        // Format: Name Loot: ... Supplies: ... Balance: ... Damage: ... Healing: ...
-        // We can split by "Loot:" to find names? Or regex?
-
-        // Original code: count occurrences of "Balance" to find NumPlayers
-        const numPlayers = (workingData.match(/Balance/g) || []).length;
-
-        const players: PlayerData[] = [];
-        let currentText = workingData;
-
-        for (let i = 0; i < numPlayers; i++) {
-            // Find Name (Text before "Loot:")
-            const lootIndex = currentText.indexOf("Loot:");
-            if (lootIndex === -1) break;
-
-            let name = currentText.substring(0, lootIndex).trim();
-
-            // Find Balance
-            const balanceIndex = currentText.indexOf("Balance: ");
-            const damageIndex = currentText.indexOf("Damage: ");
-
-            if (balanceIndex === -1 || damageIndex === -1) break;
-
-            let balanceStr = currentText.substring(balanceIndex + 9, damageIndex).trim();
-            balanceStr = balanceStr.replace(/,/g, ""); // Remove commas
-            const balance = parseInt(balanceStr, 10);
-
-            // Find Damage
-            const healingIndex = currentText.indexOf("Healing: ");
-            let damageStr = currentText.substring(damageIndex + 8, healingIndex).trim();
-            damageStr = damageStr.replace(/,/g, "");
-            const damage = parseInt(damageStr, 10);
-
-            // Find Healing
-            // Healing is usually followed by new player name or end of string?
-            // In parse logic: "data = data.substring(index_healing + 9); index_space = data.indexOf(" "); data = data.substring(index_space + 1);"
-            let healingEndIndex = healingIndex + 9;
-            // We need to cut to next iteration
-
-            const restAfterHealing = currentText.substring(healingIndex + 9);
-            const spaceAfterHealing = restAfterHealing.indexOf(" ");
-
-            let healingStr = restAfterHealing.substring(0, spaceAfterHealing).trim();
-            healingStr = healingStr.replace(/,/g, "");
-            const healing = parseInt(healingStr, 10) || 0;
-
-            players.push({
-                name,
-                balance,
-                originalBalance: balance,
-                damage: damage || 0,
-                healing: healing
-            });
-
-            // Advance text
-            currentText = restAfterHealing.substring(spaceAfterHealing + 1);
+        // Push last player
+        if (buffer.length > 0) {
+            players.push(this.parseSinglePlayerBlock(buffer));
         }
 
         return players;
+    }
+
+    private static parseSinglePlayerBlock(lines: string[]): PlayerData {
+        // Line 0 is Name
+        let name = lines[0];
+
+        // Remove " (Leader)" from name if present
+        name = name.replace(" (Leader)", "").trim();
+
+        let balance = 0;
+        let damage = 0;
+        let healing = 0;
+
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i];
+            if (line.startsWith("Balance:")) {
+                balance = parseInt(line.replace("Balance:", "").replace(/,/g, "").trim(), 10);
+            } else if (line.startsWith("Damage:")) {
+                damage = parseInt(line.replace("Damage:", "").replace(/,/g, "").trim(), 10);
+            } else if (line.startsWith("Healing:")) {
+                healing = parseInt(line.replace("Healing:", "").replace(/,/g, "").trim(), 10);
+            }
+        }
+
+        return {
+            name,
+            balance,
+            originalBalance: balance,
+            damage,
+            healing
+        };
     }
 
     /**
@@ -219,59 +236,7 @@ export class LootSplitter {
             balance: profitPerPerson - p.balance
         }));
 
-        const transfers: Transfer[] = [];
 
-        // Greedy matching
-        for (let i = 0; i < numPlayers; i++) {
-            const debtor = outstanding[i];
-
-            // If balance < 0, they retain too much profit, so they must PAY
-            if (debtor.balance < 0) {
-
-                // While they still owe money (> 5 gp tolerance)
-                while (Math.abs(debtor.balance) > 5) {
-
-                    // Find a creditor
-                    for (let j = 0; j < numPlayers; j++) {
-                        const creditor = outstanding[j];
-
-                        if (creditor.balance > 0) {
-                            const amountOwed = Math.abs(debtor.balance);
-                            const amountReceivable = creditor.balance;
-
-                            if (amountReceivable > amountOwed) {
-                                // Creditor can accept full payment
-                                transfers.push({
-                                    from: debtor.name,
-                                    to: creditor.name,
-                                    amount: Math.round(amountOwed)
-                                });
-
-                                creditor.balance -= amountOwed;
-                                debtor.balance = 0;
-                            } else {
-                                // Creditor takes what they can get, debtor still owes
-                                transfers.push({
-                                    from: debtor.name,
-                                    to: creditor.name,
-                                    amount: Math.round(amountReceivable)
-                                });
-
-                                debtor.balance += amountReceivable; // (it was negative, so adding makes it closer to 0)
-                                creditor.balance = 0;
-                            }
-                        }
-                    }
-                    // Break if no creditors left (shouldn't happen if math is right) or floating point issues
-                    if (Math.abs(debtor.balance) < 5) break;
-                    // Safety break to prevent infinite loops if sum != 0
-                    // But here we just follow the loop structure
-                    break; // The inner for-loop finds matches. If we iterate all J and verify logic... 
-                    // ACTUALLY the original logic has nested loop structure correctly.
-                    // My translation of "while" needs to ensure 'j' resets or we just re-scan.
-                }
-            }
-        }
 
         // Refined Loop based on Original Source exactly:
         // The original source iterates I (debtors). Inside, while debt > 5, iterates J (creditors).
@@ -318,13 +283,27 @@ export class LootSplitter {
                     }
                     // Determine if loop is stuck or finished
                     if (Math.abs(tempOutstanding[i].balance) <= 5) break;
-                    // Warning: If total sum is not zero, this could loop. 
+                    // Warning: If total sum is not zero, this could loop.
                     // Assuming raw data creates a zero-sum game (Total Profit - Sum(Balances) = 0).
                     // Floating point safety:
                     if (realTransfers.length > numPlayers * numPlayers) break;
                 }
             }
         }
+
+        // Calculate extras
+        const damageSplit = this.calculateDamageSplit(activePlayers);
+        const sessionDuration = this.checkDuration(players) || "00:00"; // Need to pass players or data?
+        // We don't have duration string inside 'players', we need to pass it or store it?
+        // calculate() receives players[]. We need duration.
+        // Let's change calculate signature or just formatting helper?
+        // The previous implementation of index.ts extracted duration separately.
+        // let's create a stand-alone helper or pass duration to calculate.
+
+        // For now, index.ts calls findSessionDuration separately.
+        // But we need profitPerHour inside the Result or computed outside.
+        // Let's return the numeric profitPerPerson and let index.ts use formatters?
+        // Or simpler: add static helpers and use them in index.ts.
 
         return {
             totalProfit,
@@ -339,6 +318,38 @@ export class LootSplitter {
             }
         };
     }
+
+    // Helper to extract duration from raw global log if needed, but here we process players.
+    // We'll add static helpers for the other stats to be called from index.ts
+
+    static calculateDamageSplit(players: PlayerData[]): string {
+        const totalDamage = players.reduce((acc, p) => acc + p.damage, 0);
+        if (totalDamage === 0) return "";
+
+        // Sort by damage desc
+        const sorted = [...players].sort((a, b) => b.damage - a.damage);
+
+        return sorted.map(p => {
+            const pct = ((p.damage / totalDamage) * 100).toFixed(1);
+            return `${p.name} - ${pct}%`;
+        }).join(', ');
+    }
+
+    static calculateProfitPerHour(profitPerPerson: number, duration: string): string {
+        // Duration format "HH:mm" or "HH:mmh"
+        const clean = duration.replace('h', '').trim();
+        const parts = clean.split(':').map(Number);
+        if (parts.length !== 2) return "0";
+
+        const hours = parts[0] + (parts[1] / 60);
+        if (hours === 0) return "0";
+
+        const profitHour = profitPerPerson / hours;
+        return this.formatNumber(profitHour);
+    }
+
+    // Check internal method usage or remove if legacy
+    private static checkDuration(players: any): string { return ""; } // Placeholder
 
     static formatNumber(num: number): string {
         const abs = Math.abs(num);
