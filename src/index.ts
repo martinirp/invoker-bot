@@ -537,12 +537,18 @@ client.on(Events.InteractionCreate, async interaction => {
           session.lastResult = result;
 
           try {
-            const msg = await interaction.guild.channels.cache.get(interaction.channelId).messages.fetch(messageId);
-            await updateLootMessage(interaction, result, msg);
-          } catch (e) { console.error(e); }
+            // Pass NULL as originalMessage so updateLootMessage uses interaction.update()
+            await updateLootMessage(interaction, result, null);
+          } catch (e) {
+            console.error('Error updating loot message:', e);
+            if (!interaction.replied && !interaction.deferred) {
+              return interaction.reply({ content: '❌ Erro ao atualizar.', ephemeral: true });
+            }
+          }
+        } else {
+          // No changes? Just defer to clear loading state
+          return interaction.deferUpdate();
         }
-
-        return interaction.deferUpdate();
       }
 
       if (interaction.customId.startsWith('loot_modal_direct_extra_')) {
@@ -576,11 +582,13 @@ client.on(Events.InteractionCreate, async interaction => {
           session.lastResult = result;
 
           try {
-            const msg = await interaction.guild.channels.cache.get(interaction.channelId).messages.fetch(messageId);
-            await updateLootMessage(interaction, result, msg);
-            return interaction.deferUpdate();
+            // Pass NULL so updateLootMessage uses interaction.update()
+            await updateLootMessage(interaction, result, null);
           } catch (err) {
-            return interaction.reply({ content: '❌ Erro ao atualizar.', ephemeral: true });
+            console.error(err);
+            if (!interaction.replied && !interaction.deferred) {
+              return interaction.reply({ content: '❌ Erro ao atualizar.', ephemeral: true });
+            }
           }
         } else {
           return interaction.reply({ content: `❌ Jogador "${identifier}" não encontrado (use ID ou Nome Exato).`, ephemeral: true });
