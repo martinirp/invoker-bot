@@ -280,6 +280,7 @@ client.on(Events.MessageCreate, async message => {
           .setColor(result.totalProfit >= 0 ? 0x00FF00 : 0xFF0000);
 
         const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('loot_btn_add').setLabel('Add Session').setStyle(3),
           new ButtonBuilder().setCustomId('loot_btn_extra').setLabel('Extra Expenses').setStyle(2),
           new ButtonBuilder().setCustomId('loot_btn_copy').setLabel('Copy All').setStyle(2),
           new ButtonBuilder().setCustomId('loot_btn_remove').setLabel('Remove Players').setStyle(4)
@@ -441,6 +442,7 @@ client.on(Events.InteractionCreate, async interaction => {
         .setColor(result.totalProfit >= 0 ? 0x00FF00 : 0xFF0000);
 
       const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('loot_btn_add').setLabel('Add Session').setStyle(3),
         new ButtonBuilder().setCustomId('loot_btn_extra').setLabel('Extra Expenses').setStyle(2),
         new ButtonBuilder().setCustomId('loot_btn_copy').setLabel('Copy All').setStyle(2),
         new ButtonBuilder().setCustomId('loot_btn_remove').setLabel('Remove Players').setStyle(4)
@@ -461,12 +463,30 @@ client.on(Events.InteractionCreate, async interaction => {
         return interaction.reply({ content: '❌ Sessão expirada ou não encontrada.', ephemeral: true });
       }
 
+      if (interaction.customId === 'loot_btn_add') {
+        const modal = new ModalBuilder()
+          .setCustomId(`loot_modal_add_${messageId}`)
+          .setTitle('Somar Party Hunt');
+
+        const input = new TextInputBuilder()
+          .setCustomId('add_log_content')
+          .setLabel("Cole o novo log aqui")
+          .setStyle(TextInputStyle.Paragraph)
+          .setPlaceholder("Session data: From...")
+          .setRequired(true);
+
+        modal.addComponents(new ActionRowBuilder().addComponents(input));
+        return interaction.showModal(modal);
+      }
+
       if (interaction.customId === 'loot_btn_copy') {
         const embed = interaction.message.embeds[0];
         if (!embed || !embed.description) return interaction.reply({ content: '❌ Nada para copiar.', ephemeral: true });
 
-        const rawText = embed.description;
-        // User requested: "dentro desse embed vai ter uma caixa de texto" (code block)
+        let rawText = embed.description || "";
+        // Remove existing code blocks to prevent breaking the outer block
+        rawText = rawText.replace(/```text/g, '').replace(/```/g, '');
+
         const copyEmbed = createEmbed()
           .setTitle('📝 Copiar Tudo (Expira em 1m)')
           .setDescription(`\`\`\`text\n${rawText}\n\`\`\``)
@@ -549,6 +569,46 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     if (interaction.isModalSubmit()) {
+      if (interaction.customId.startsWith('loot_modal_add_')) {
+        const messageId = interaction.customId.replace('loot_modal_add_', '');
+        const session = lootSessionMap.get(messageId);
+        if (!session) return interaction.reply({ content: '❌ Sessão expirada.', ephemeral: true });
+
+        const content = interaction.fields.getTextInputValue('add_log_content');
+        let newPlayers = [];
+
+        if (LootSplitter.isValidLog(content)) {
+          newPlayers = LootSplitter.parsePlayers(content);
+        } else if (LootSplitter.isValidBankTransferLog(content)) {
+          const res = LootSplitter.parseBankTransferLog(content);
+          newPlayers = res.players;
+        } else {
+          return interaction.reply({ content: '❌ Log inválido (cole um log do Tibia ou transferências).', ephemeral: true });
+        }
+
+        // Merge
+        const merged = LootSplitter.mergePlayers(session.players, newPlayers);
+        session.players = merged;
+
+        if (!session.history) session.history = [];
+        session.history.push(`➕ Merged new session`);
+
+        session.originalLog += "\n" + content;
+
+        const result = LootSplitter.calculate(session.players);
+        session.lastResult = result;
+
+        try {
+          await updateLootMessage(interaction, result, null);
+        } catch (e) {
+          console.error(e);
+          if (!interaction.replied && !interaction.deferred) {
+            interaction.reply({ content: '❌ Erro ao atualizar.', ephemeral: true }).catch(() => { });
+          }
+        }
+        return;
+      }
+
       if (interaction.customId.startsWith('loot_modal_remove_')) {
         const messageId = interaction.customId.replace('loot_modal_remove_', '');
         const session = lootSessionMap.get(messageId);

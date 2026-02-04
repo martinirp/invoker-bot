@@ -445,4 +445,37 @@ export class LootSplitter {
         if (abs > 1000) return `${sign}${Math.round(abs / 1000)}k`;
         return `${sign}${Math.round(abs)} gp`;
     }
+
+    static mergePlayers(current: PlayerData[], incoming: PlayerData[]): PlayerData[] {
+        const merged = current.map(p => ({ ...p }));
+
+        for (const inc of incoming) {
+            const existing = merged.find(p => p.name === inc.name);
+            if (existing) {
+                existing.balance += inc.balance;
+                existing.damage += inc.damage;
+                existing.healing += inc.healing;
+                existing.originalBalance = (existing.originalBalance || 0) + (inc.originalBalance !== undefined ? inc.originalBalance : inc.balance);
+            } else {
+                merged.push({ ...inc, originalBalance: inc.balance });
+            }
+        }
+        return merged;
+    }
+
+    static sumDurations(d1: string, d2: string): string {
+        const clean1 = (d1 || "00:00").replace('h', '').trim();
+        const clean2 = (d2 || "00:00").replace('h', '').trim();
+
+        const [h1, m1] = clean1.split(':').map(n => parseInt(n) || 0);
+        const [h2, m2] = clean2.split(':').map(n => parseInt(n) || 0);
+
+        let totalM = m1 + m2;
+        let totalH = h1 + h2;
+
+        totalH += Math.floor(totalM / 60);
+        totalM = totalM % 60;
+
+        return `${totalH.toString().padStart(2, '0')}:${totalM.toString().padStart(2, '0')}h`;
+    }
 }
