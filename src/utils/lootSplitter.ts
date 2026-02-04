@@ -41,6 +41,93 @@ export class LootSplitter {
     }
 
     /**
+     * Checks if the text is a pasted Bank Transfer log
+     */
+    static isValidBankTransferLog(text: string): boolean {
+        return text.includes("Bank transfers:") && text.includes("should transfer");
+    }
+
+    /**
+     * Parses a Bank Transfer log into a SplitResult
+     */
+    static parseBankTransferLog(text: string): SplitResult {
+        const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l);
+        const transfers: Transfer[] = [];
+        const playerNames = new Set<string>();
+
+        let totalProfit = 0;
+        let profitPerPerson = 0;
+
+        // Regex for "PlayerA should transfer 12345 to PlayerB"
+        // Supporting names with spaces.
+        // "Bhardiklaus should transfer 297828 to Tutuca Ed"
+        const transferRegex = /^(.+) should transfer ([\d\.,]+) to (.+)$/i;
+
+        // Regex for "Total profit: -610.292 $ (-101.715 $ each)"
+        // Handling $ sign and various number formats.
+        const footerRegex = /Total profit:\s*([\-\d\.,]+).*?\(\s*([\-\d\.,]+)/i;
+
+        for (const line of lines) {
+            if (line.match(transferRegex)) {
+                const match = line.match(transferRegex);
+                if (match) {
+                    const from = match[1].trim();
+                    const amountRaw = match[2].replace(/[\.,]/g, ""); // Assume Integer for Amount (Tibia Gold)
+                    const to = match[3].trim();
+                    const amount = parseInt(amountRaw, 10);
+
+                    transfers.push({ from, to, amount });
+                    playerNames.add(from);
+                    playerNames.add(to);
+                }
+            } else if (line.match(footerRegex)) {
+                const match = line.match(footerRegex);
+                if (match) {
+                    // Total Profit usually has separators.
+                    // If it has "610.292", is it 610k or 610? 
+                    // Tibia Analyser uses 1,234,567. 
+                    // User pasted "-610.292". Probably 610k. 
+                    // Let's normalize: remove non-numeric chars except minus.
+                    // Actually, let's keep it simple: Parse as Int often works for GP. 
+                    // But if user pasted from a website, formating might vary.
+                    // Let's replace `.` and `,` and whitespace.
+                    // Wait. -610.292 might be DECIMAL? "-610.292 $" -> 610k? 
+                    // Let's assume standard integer GP logic first.
+                    // If the user's input has `.` as "thousands", removing it is correct.
+
+                    const totalRaw = match[1].replace(/[^0-9\-]/g, "");
+                    const pppRaw = match[2].replace(/[^0-9\-]/g, "");
+
+                    totalProfit = parseInt(totalRaw, 10);
+                    profitPerPerson = parseInt(pppRaw, 10);
+                }
+            }
+        }
+
+        // Construct fake players objects (balances unknown, but names are needed for UI)
+        const players: PlayerData[] = Array.from(playerNames).map(name => ({
+            name,
+            balance: 0,
+            damage: 0,
+            healing: 0,
+            originalBalance: 0
+        }));
+
+        return {
+            totalProfit,
+            profitPerPerson,
+            transfers,
+            sessionDate: new Date().toISOString().split('T')[0] + " (Imported)",
+            sessionDuration: "00:00",
+            players,
+            formatted: {
+                totalProfit: this.formatNumber(totalProfit),
+                profitPerPerson: this.formatNumber(profitPerPerson)
+            }
+        };
+    }
+
+    /**
      * Extracts the session date (YYYY-MM-DD)
      */
     static findSessionDate(data: string): string {

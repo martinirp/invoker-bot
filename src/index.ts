@@ -215,16 +215,31 @@ client.on(Events.MessageCreate, async message => {
   if (message.channel.id === '1467419860727234611' && !message.author.bot) {
     const content = message.content;
 
-    if (LootSplitter.isValidLog(content)) {
-      try {
-        const players = LootSplitter.parsePlayers(content);
-        const result = LootSplitter.calculate(players);
+    let result = null;
+    let players = [];
+    let sessionDate = "";
+    let sessionDuration = "";
+    let damageSplit = "";
 
-        const sessionDuration = LootSplitter.findSessionDuration(content);
+    try {
+      if (LootSplitter.isValidLog(content)) {
+        players = LootSplitter.parsePlayers(content);
+        result = LootSplitter.calculate(players);
+        sessionDate = LootSplitter.findSessionDate(content);
+        sessionDuration = LootSplitter.findSessionDuration(content);
+        damageSplit = LootSplitter.calculateDamageSplit(players);
+      } else if (LootSplitter.isValidBankTransferLog(content)) {
+        result = LootSplitter.parseBankTransferLog(content);
+        players = result.players;
+        sessionDate = result.sessionDate;
+        sessionDuration = result.sessionDuration;
+        damageSplit = ""; // Requested to be empty
+      }
+
+      if (result) {
         const profitPerHour = LootSplitter.calculateProfitPerHour(result.profitPerPerson, sessionDuration);
-        const damageSplit = LootSplitter.calculateDamageSplit(players);
 
-        let desc = `**Session:** ${LootSplitter.findSessionDate(content)} (${sessionDuration})\n` +
+        let desc = `**Session:** ${sessionDate} (${sessionDuration})\n` +
           `**Total Profit:** ${result.formatted.totalProfit}\n` +
           `**Per Person:** ${result.formatted.profitPerPerson}\n` +
           `**Profit/Hr:** ${profitPerHour} for each player\n\n` +
@@ -243,44 +258,59 @@ client.on(Events.MessageCreate, async message => {
           desc += `\n**Damage Split:** ${damageSplit}`;
         }
 
+        // ADD per person list for ID reference (Copied from updateLootMessage logic)
+        // This ensures consistency with the Updated format
+        if (players.length > 0) {
+          const perPersonList = players.map((p, i) => {
+            let line = `${i + 1}. **${p.name}**`;
+            // For Bank Transfer import, balance is 0/unknown, so maybe omit balance?
+            // Or just show standard format.
+            // Standard: `1. Name: +100 gp`
+            // LootSplitter.formatNumber(p.balance)
+            line += `: ${LootSplitter.formatNumber(p.balance)}`;
+            if (p.isRemoved) line += ` 🚫`;
+            return line;
+          }).join('\n');
+          desc += `\n\n**Balance by Player (ID):**\n${perPersonList}`;
+        }
+
         const embed = createEmbed()
           .setTitle('💰 Tibia Loot Splitter')
           .setDescription(desc)
           .setColor(result.totalProfit >= 0 ? 0x00FF00 : 0xFF0000);
 
         const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('loot_btn_extra').setLabel('Extra Expenses').setStyle(2), // Secondary
-          new ButtonBuilder().setCustomId('loot_btn_remove').setLabel('Remove Players').setStyle(4) // Danger
+          new ButtonBuilder().setCustomId('loot_btn_extra').setLabel('Extra Expenses').setStyle(2),
+          new ButtonBuilder().setCustomId('loot_btn_copy').setLabel('Copy All').setStyle(2),
+          new ButtonBuilder().setCustomId('loot_btn_remove').setLabel('Remove Players').setStyle(4)
         );
 
         const replyMsg = await message.channel.send({ embeds: [embed], components: [row] });
 
-        // Salvar estado para interações futuras
         lootSessionMap.set(replyMsg.id, {
           originalLog: content,
           players: players,
           lastResult: result,
-          history: [] // Init History
+          history: []
         });
 
-        // Limpar memória após 1 hora
         setTimeout(() => lootSessionMap.delete(replyMsg.id), 3600000);
-
-        return; // Parar processamento de outros comandos
-      } catch (e) {
-        console.error('[LOOT SPLITTER] Erro ao processar:', e);
-        // Não responder erro para não spammar se for apenas chat normal
+        return;
       }
-    } else {
+    } catch (e) {
+      console.error('[LOOT SPLITTER] Erro ao processar:', e);
+    }
+
+    if (!result) { // If logic fell through or invalid
       // ❌ Log Inválido (Regra estrita do canal)
       try {
         const reply = await message.reply('esse party hunt ai tá errado');
         setTimeout(() => {
-          message.delete().catch(() => { }); // Deleta mensagem do user
-          reply.delete().catch(() => { });   // Deleta resposta do bot
+          message.delete().catch(() => { });
+          reply.delete().catch(() => { });
         }, 5000);
-      } catch (e) {
-        console.error('[LOOT CLEANUP] Erro ao deletar:', e);
+      } catch (err) {
+        console.error('[LOOT CLEANUP] Erro ao deletar:', err);
       }
     }
   }
@@ -412,6 +442,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('loot_btn_extra').setLabel('Extra Expenses').setStyle(2),
+        new ButtonBuilder().setCustomId('loot_btn_copy').setLabel('Copy All').setStyle(2),
         new ButtonBuilder().setCustomId('loot_btn_remove').setLabel('Remove Players').setStyle(4)
       );
 
@@ -428,6 +459,25 @@ client.on(Events.InteractionCreate, async interaction => {
 
       if (!session) {
         return interaction.reply({ content: '❌ Sessão expirada ou não encontrada.', ephemeral: true });
+      }
+
+      if (interaction.customId === 'loot_btn_copy') {
+        const embed = interaction.message.embeds[0];
+        if (!embed || !embed.description) return interaction.reply({ content: '❌ Nada para copiar.', ephemeral: true });
+
+        const rawText = embed.description;
+        // User requested: "dentro desse embed vai ter uma caixa de texto" (code block)
+        const copyEmbed = createEmbed()
+          .setTitle('📝 Copiar Tudo (Expira em 1m)')
+          .setDescription(`\`\`\`text\n${rawText}\n\`\`\``)
+          .setColor(0xcccccc);
+
+        const reply = await interaction.reply({ embeds: [copyEmbed], fetchReply: true });
+
+        setTimeout(() => {
+          reply.delete().catch(() => { });
+        }, 60000);
+        return;
       }
 
       if (interaction.customId === 'loot_btn_remove') {
