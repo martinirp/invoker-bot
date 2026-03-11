@@ -78,11 +78,7 @@ async function runYtDlp(args, options = {}, retryCount = 0) {
   }
 
   try {
-    // 🧪 TESTE: Forçar erro na primeira tentativa para testar proxy
-    if (retryCount === 0) {
-      console.warn('[YT-DLP] 🧪 SIMULANDO ERRO 429 PARA TESTAR PROXY...');
-      throw new Error('HTTP Error 429: Too Many Requests (SIMULATED)');
-    }
+    // (Removida a simulação forçada de erro 429 para testar proxy)
 
     return await runProcess('yt-dlp', finalArgs, options);
   } catch (err) {
