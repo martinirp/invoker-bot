@@ -26,7 +26,10 @@ function runProcess(cmd, args, options = {}) {
 }
 
 function getCookieArgs() {
-  const cookieArgs = ['--js-runtimes', 'node'];
+  const cookieArgs = [
+    '--js-runtimes', 'node',
+    '--remote-components', 'ejs:github'
+  ];
   if (process.env.YOUTUBE_COOKIES_FROM_BROWSER) {
     cookieArgs.push('--cookies-from-browser', process.env.YOUTUBE_COOKIES_FROM_BROWSER);
   } else if (process.env.YOUTUBE_COOKIES_FILE) {
