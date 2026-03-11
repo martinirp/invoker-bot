@@ -34,9 +34,6 @@ function createOpusStreamFromUrl(url) {
     '-x',  // Extract audio
     '--audio-format', 'opus',  // Convert to Opus (Discord-compatible)
     '--no-playlist',
-    '--add-header', 'referer:youtube.com',
-    '--add-header', 'user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-    '--extractor-args', 'youtube:player_client=tv,web,mweb', 
     '-o', outputFile,
     url
   ];
