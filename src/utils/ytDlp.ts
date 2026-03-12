@@ -131,5 +131,16 @@ async function downloadAudio(videoId, bitrate, outputPath) {
   await runYtDlp(args);
 }
 
-module.exports = { runYtDlp, runYtDlpJson, downloadAudio, getCookieArgs };
+async function downloadForDiscord(videoId, streamUrl, outputPath) {
+  const url = streamUrl || `https://youtube.com/watch?v=${videoId}`;
+  const args = [
+    '-x',  // Extract audio
+    '--audio-format', 'opus',  // Convert to Opus (Discord-compatible)
+    '--no-playlist',
+    '-o', outputPath,
+    url
+  ];
+  await runYtDlp(args);
+}
 
+module.exports = { runYtDlp, runYtDlpJson, downloadAudio, getCookieArgs, downloadForDiscord };

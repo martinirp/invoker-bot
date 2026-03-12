@@ -1,20 +1,47 @@
 import fs from 'fs';
+import path from 'path';
 import type { DownloadGuildState, DownloadQueueItem, Song } from '../types/music';
 
-// CommonJS helpers (modules export via module.exports)
 const cachePath = require('./cachePath') as (id: string) => string;
-const { createOpusStream, createOpusStreamFromUrl } = require('./stream');
-const { writeCache } = require('./cacheWriter');
+const { downloadForDiscord } = require('./ytDlp');
+const db = require('./db');
+const { normalizeTitle } = require('./textUtils');
+const { updateMetadataAsync } = require('./metadataFetcher');
+
+function generateKeysFromTitle(title: string) {
+  const clean = normalizeTitle(title || '');
+  const parts = clean.split(' - ');
+
+  const keys = new Set<string>();
+
+  if (parts.length >= 2) {
+    const artist = parts[0].trim();
+    const track = parts.slice(1).join(' - ').trim();
+
+    keys.add(`${artist} ${track}`);
+    keys.add(`${track} ${artist}`);
+    keys.add(artist);
+    keys.add(track);
+  } else {
+    keys.add(clean);
+  }
+
+  return keys;
+}
 
 class DownloadQueue {
   private guilds: Map<string, DownloadGuildState>;
   private active: number;
   private readonly MAX_CONCURRENCY: number;
+  
+  // Track ongoing downloads to allow awaiting them
+  private activeDownloads: Map<string, Promise<string>>;
 
   constructor() {
     this.guilds = new Map();
     this.active = 0;
     this.MAX_CONCURRENCY = Number(process.env.DOWNLOAD_CONCURRENCY || 4);
+    this.activeDownloads = new Map();
   }
 
   get(guildId: string): DownloadGuildState {
@@ -25,45 +52,147 @@ class DownloadQueue {
         currentController: null
       });
     }
-    // non-null because set above
     return this.guilds.get(guildId)!;
   }
 
   enqueue(guildId: string, song: Song) {
     const g = this.get(guildId);
-
-    const file = song.file || cachePath(song.videoId || '');
+    const videoId = song.videoId || '';
+    const file = song.file || cachePath(videoId);
     if (fs.existsSync(file)) return;
 
-    if (g.queue.find(s => s.videoId === song.videoId)) return;
+    if (g.queue.find(s => s.videoId === videoId)) return;
 
     const item: DownloadQueueItem = { ...song, file } as DownloadQueueItem;
     g.queue.push(item);
     this._tryNext();
   }
 
-  private _startDownload(guildId: string, song: DownloadQueueItem, state: DownloadGuildState) {
+  async awaitDownload(song: Song, textChannel?: any) {
+    const videoId = song.videoId || '';
+    const file = song.file || cachePath(videoId);
+
+    // Se já existe, retorna rápido
+    if (fs.existsSync(file)) return file;
+
+    // Se já está baixando, apenas aguarda
+    if (this.activeDownloads.has(videoId)) {
+      if (textChannel) {
+         textChannel.send({ embeds: [{ description: `⏳ Aguardando download de **${song.title}**...`, color: 0xFFFF00 }] }).catch(() => {});
+      }
+      try {
+        await this.activeDownloads.get(videoId);
+        return file;
+      } catch (err) {
+        console.error(`[DOWNLOAD] Erro ao aguardar download de ${videoId}:`, err);
+        throw err;
+      }
+    }
+
+    // Se não está baixando, precisamos forçar o download IMEDIATAMENTE e aguardar
+    if (textChannel) {
+       textChannel.send({ embeds: [{ description: `⏳ Baixando **${song.title}** (isso pode levar alguns segundos)...`, color: 0xFFFF00 }] }).catch(() => {});
+    }
+    
+    // Iniciar o download agora e registrar na lista de downloads ativos
+    const promise = this._performDownload(song, file);
+    this.activeDownloads.set(videoId, promise);
+    
+    try {
+      await promise;
+      return file;
+    } finally {
+      this.activeDownloads.delete(videoId);
+      this._tryNext(); // Liberar a fila caso estivesse bloqueada
+    }
+  }
+
+  private async _startDownload(guildId: string, song: DownloadQueueItem, state: DownloadGuildState) {
     state.downloading = true;
     this.active += 1;
+    const videoId = song.videoId || '';
+    const file = song.file;
 
-    console.log(`[DOWNLOAD] ${guildId} → baixando: ${song.title}`);
-
-    const stream = song.streamUrl 
-      ? createOpusStreamFromUrl(song.streamUrl)
-      : createOpusStream(song.videoId || '');
-
-    const finalize = () => {
+    // Se já existe no activeDownloads (sendo baixado forçadamente pelo awaitDownload), apenas aguarda
+    if (this.activeDownloads.has(videoId)) {
+      try { await this.activeDownloads.get(videoId); } catch {}
       state.downloading = false;
       this.active = Math.max(0, this.active - 1);
       this._tryNext();
-    };
+      return;
+    }
 
-    stream.on('error', err => {
-      console.error('[DOWNLOAD] erro no stream:', err);
-      finalize();
+    console.log(`[DOWNLOAD] ${guildId} → pre-fetching: ${song.title}`);
+    
+    const promise = this._performDownload(song, file);
+    this.activeDownloads.set(videoId, promise);
+
+    try {
+      await promise;
+    } catch (err) {
+      console.error(`[DOWNLOAD] Erro no background download de ${song.title}:`, err);
+    } finally {
+      this.activeDownloads.delete(videoId);
+      state.downloading = false;
+      this.active = Math.max(0, this.active - 1);
+      this._tryNext();
+    }
+  }
+
+  private async _performDownload(song: any, finalFile: string) {
+    const videoId = song.videoId || '';
+    const title = song.title || '';
+    const dir = path.dirname(finalFile);
+    fs.mkdirSync(dir, { recursive: true });
+
+    const tempFile = `${finalFile}.part`;
+
+    // Deletar tempFile se existir de uma execução anterior abortada
+    if (fs.existsSync(tempFile)) {
+      try { fs.unlinkSync(tempFile); } catch {}
+    }
+
+    // Executar yt-dlp de forma síncrona/promissificada
+    await downloadForDiscord(videoId, song.streamUrl, tempFile);
+
+    // Validação de arquivo final
+    if (!fs.existsSync(tempFile)) {
+      throw new Error(`Arquivo não foi gerado pelo yt-dlp: ${tempFile}`);
+    }
+
+    const stats = fs.statSync(tempFile);
+    if (stats.size === 0) {
+      fs.unlinkSync(tempFile);
+      throw new Error(`Arquivo gerado vazio`);
+    }
+
+    // Renomear pro arquivo final
+    fs.renameSync(tempFile, finalFile);
+
+    // DB updates
+    const keys = generateKeysFromTitle(title);
+    keys.add(videoId);
+
+    db.insertSong({
+      videoId,
+      title,
+      artist: null,
+      track: null,
+      file: finalFile,
+      streamUrl: song.streamUrl || null
     });
 
-    writeCache(song.videoId || '', song.title, stream, finalize, song.streamUrl);
+    for (const k of keys) {
+      db.insertKey(k, videoId);
+    }
+
+    // Metadados em background
+    updateMetadataAsync(videoId).catch((err: any) => {
+      console.error('[METADATA] Erro na atualização assíncrona:', err);
+    });
+
+    console.log(`[DOWNLOAD-DB] Concluído e salvo no banco: ${title}`);
+    return finalFile;
   }
 
   private _tryNext() {
@@ -84,9 +213,6 @@ class DownloadQueue {
     if (g?.currentController) {
       try { g.currentController.abort(); } catch {}
     }
-    if (g?.downloading) {
-      this.active = Math.max(0, this.active - 1);
-    }
     this.guilds.delete(guildId);
     this._tryNext();
   }
@@ -96,4 +222,3 @@ const downloadQueue = new DownloadQueue();
 module.exports = downloadQueue;
 module.exports.default = downloadQueue;
 module.exports.DownloadQueue = DownloadQueue;
-

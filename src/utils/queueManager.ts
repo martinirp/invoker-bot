@@ -16,8 +16,6 @@ import type { Message } from 'discord.js';
 import type { Song } from '../types/music';
 
 // CommonJS-style imports
-const { createOpusStream, createOpusStreamFromUrl } = require('./stream');
-const { createOpusTailStream } = require('./fileTailStream');
 const { createEmbed, createSongEmbed } = require('./embed');
 const { resolve, tokenize } = require('./resolver');
 const cachePath = require('./cachePath') as (id: string) => string;
@@ -290,78 +288,25 @@ class QueueManager {
 
     let resource;
 
-    // Garantir caminho do arquivo se tivermos videoId
-    if (!song.file && song.videoId) {
-      song.file = cachePath(song.videoId);
-    }
+    try {
+      const finalFile = await downloadQueue.awaitDownload(song, g.textChannel);
+      song.file = finalFile;
+      const absPath = path.resolve(finalFile);
 
-    const absPath = song.file ? path.resolve(song.file) : null;
-    const partPath = song.file ? path.resolve(`${song.file}.part`) : null;
-    const hasCache = !!(absPath && fs.existsSync(absPath) && isValidOggOpus(absPath));
-    const hasPart = !!(partPath && fs.existsSync(partPath) && isValidOggOpus(partPath));
+      if (!fs.existsSync(absPath) || !isValidOggOpus(absPath)) {
+        throw new Error(`Arquivo inválido ou não encontrado após download: ${absPath}`);
+      }
 
-    if (hasCache) {
-      console.log(`[PLAYBACK][${guildId}] src=cache file=${absPath}`);
-      // Cache hit válido: usa o arquivo direto para reduzir overhead
+      console.log(`[PLAYBACK][${guildId}] src=download file=${absPath}`);
       resource = createAudioResource(absPath, { inputType: StreamType.OggOpus });
       g.currentStream = null;
-    } else if (hasPart) {
-      console.log(`[PLAYBACK][${guildId}] src=tail (part exists) part=${partPath} → final=${absPath}`);
-      // Tocar do arquivo parcial, seguindo crescimento e alternando para o final ao concluir
-      const tail = createOpusTailStream(absPath);
-      tail.on('error', err => {
-        console.warn('[TAIL] aviso:', err?.message || err);
-      });
-      g.currentStream = tail;
-      resource = createAudioResource(tail, { inputType: StreamType.OggOpus, inlineVolume: false });
-    } else {
-      // Preferir tocar do arquivo parcial; aguardar curto período para .part aparecer
-      console.log(`[PLAYBACK][${guildId}] src=await_part: aguardando .part por até 800ms...`);
-      let usedTail = false;
-      if (partPath) {
-        const startWait = Date.now();
-        while (!fs.existsSync(partPath) && (Date.now() - startWait) < 800) {
-          await new Promise(r => setTimeout(r, 100));
-        }
-        if (fs.existsSync(partPath)) {
-          console.log(`[PLAYBACK][${guildId}] src=tail (part exists, header gated) part=${partPath}`);
-          const tail = createOpusTailStream(absPath);
-          tail.on('error', err => {
-            console.warn('[TAIL] aviso:', err?.message || err);
-          });
-          g.currentStream = tail;
-          resource = createAudioResource(tail, { inputType: StreamType.OggOpus, inlineVolume: false });
-          usedTail = true;
-        }
-      }
-      if (!usedTail) {
-        // Fallback: stream direto (tocando enquanto baixa em paralelo)
-        console.log(`[PLAYBACK][${guildId}] src=stream (sem .part)`);
-        const stream = song.streamUrl
-          ? createOpusStreamFromUrl(song.streamUrl)
-          : createOpusStream(song.videoId);
-
-        stream.on('error', err => {
-          const code = err?.code || '';
-          const msg = err?.message || '';
-          if (code === 'EPIPE' || code === 'EOF' || /premature/i.test(msg)) {
-            console.warn('[STREAM] aviso (não crítico):', msg || code);
-            try { stream.destroy(); } catch { } // 🔥 FIX: Destruir stream
-            g.currentStream = null;
-            return;
-          }
-          console.error('[STREAM] erro crítico:', err);
-          try { stream.destroy(); } catch { } // 🔥 FIX: Destruir stream
-          g.currentStream = null;
-          if (!g.failedAttempts) g.failedAttempts = new Map();
-          const attempts = g.failedAttempts.get(song.videoId) || 0;
-          g.failedAttempts.set(song.videoId, attempts + 1);
-          this.next(guildId);
-        });
-
-        g.currentStream = stream;
-        resource = createAudioResource(stream, { inputType: StreamType.OggOpus, inlineVolume: false });
-      }
+    } catch (err) {
+      console.error(`[PLAYBACK] Falha ao baixar ou tocar:`, err);
+      if (!g.failedAttempts) g.failedAttempts = new Map();
+      const attempts = g.failedAttempts.get(song.videoId) || 0;
+      g.failedAttempts.set(song.videoId, attempts + 1);
+      this.next(guildId);
+      return;
     }
 
     // Garantir conexão pronta antes de tocar (reduz silêncio inicial)
