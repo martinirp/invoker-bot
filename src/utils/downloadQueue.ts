@@ -40,7 +40,7 @@ class DownloadQueue {
   constructor() {
     this.guilds = new Map();
     this.active = 0;
-    this.MAX_CONCURRENCY = Number(process.env.DOWNLOAD_CONCURRENCY || 4);
+    this.MAX_CONCURRENCY = Number(process.env.DOWNLOAD_CONCURRENCY || 10);
     this.activeDownloads = new Map();
   }
 
@@ -197,7 +197,7 @@ class DownloadQueue {
 
   private _tryNext() {
     while (this.active < this.MAX_CONCURRENCY) {
-      const entry = [...this.guilds.entries()].find(([, st]) => !st.downloading && st.queue.length > 0);
+      const entry = [...this.guilds.entries()].find(([, st]) => st.queue.length > 0);
       if (!entry) return;
 
       const [guildId, state] = entry;
