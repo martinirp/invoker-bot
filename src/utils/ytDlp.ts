@@ -135,12 +135,19 @@ async function downloadForDiscord(videoId, streamUrl, outputPath) {
   const url = streamUrl || `https://youtube.com/watch?v=${videoId}`;
   const args = [
     '-x',  // Extract audio
-    '--audio-format', 'opus',  // Convert to Opus (Discord-compatible)
+    '--audio-format', 'opus',  // Convert to Opus
     '--no-playlist',
+    // Force the exact output name dropping the auto-appended extension
     '-o', outputPath,
     url
   ];
   await runYtDlp(args);
+  
+  // yt-dlp sometimes creates "outputPath.opus". If so, rename it to exactly outputPath
+  const fs = require('fs');
+  if (!fs.existsSync(outputPath) && fs.existsSync(`${outputPath}.opus`)) {
+    fs.renameSync(`${outputPath}.opus`, outputPath);
+  }
 }
 
 module.exports = { runYtDlp, runYtDlpJson, downloadAudio, getCookieArgs, downloadForDiscord };
