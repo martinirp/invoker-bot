@@ -3,19 +3,40 @@ const { spawn } = require('child_process');
 const { getPlaylistItems } = require('./youtubeApi');
 
 function isYoutubeLink(input) {
-  return /youtu\.?be/.test(input);
+  try {
+    const url = new URL(input);
+    return ['youtube.com', 'www.youtube.com', 'youtu.be', 'music.youtube.com'].includes(url.hostname);
+  } catch {
+    return false;
+  }
 }
 
 function isSoundCloudLink(input) {
-  return /soundcloud\.com/.test(input);
+  try {
+    const url = new URL(input);
+    return url.hostname.includes('soundcloud.com');
+  } catch {
+    return false;
+  }
 }
 
 function isBandcampLink(input) {
-  return /bandcamp\.com/.test(input);
+  try {
+    const url = new URL(input);
+    return url.hostname.includes('bandcamp.com');
+  } catch {
+    return false;
+  }
 }
 
 function isSpotifyLink(input) {
-  return /spotify\.com|spotify:/.test(input);
+  if (input.startsWith('spotify:')) return true;
+  try {
+    const url = new URL(input);
+    return ['spotify.com', 'open.spotify.com'].includes(url.hostname);
+  } catch {
+    return false;
+  }
 }
 
 function isDirectAudioUrl(input) {
@@ -23,7 +44,10 @@ function isDirectAudioUrl(input) {
 }
 
 function isPlaylist(input) {
-  return /list=/.test(input);
+  // Ignora mixes ou rádios automáticas (ex: list=RD..., WL, LL)
+  if (/[?&]start_radio=1/.test(input)) return false;
+  if (/[?&]list=(RD|WL|LL|LM)/.test(input)) return false;
+  return /[?&]list=/.test(input);
 }
 
 function getPlaylistId(url) {
