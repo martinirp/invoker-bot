@@ -26,8 +26,9 @@ function runProcess(cmd, args, options = {}) {
 }
 
 async function runYtDlp(args, options = {}) {
+  const defaultArgs = ['--js-runtimes', 'node'];
   try {
-    return await runProcess('yt-dlp', args, options);
+    return await runProcess('yt-dlp', [...defaultArgs, ...args], options);
   } catch (err) {
     throw err;
   }
