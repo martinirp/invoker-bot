@@ -25,86 +25,10 @@ function runProcess(cmd, args, options = {}) {
   });
 }
 
-function getCookieArgs() {
-  const cookieArgs = [
-    '--js-runtimes', 'node',
-    '--remote-components', 'ejs:github'
-  ];
-  if (process.env.YOUTUBE_COOKIES_FROM_BROWSER) {
-    cookieArgs.push('--cookies-from-browser', process.env.YOUTUBE_COOKIES_FROM_BROWSER);
-  } else if (process.env.YOUTUBE_COOKIES_FILE) {
-    cookieArgs.push('--cookies', process.env.YOUTUBE_COOKIES_FILE);
-  }
-  return cookieArgs;
-}
-
-const fs = require('fs');
-const path = require('path');
-
-let proxies = [];
-try {
-  const proxyPath = path.resolve('proxies.txt');
-  if (fs.existsSync(proxyPath)) {
-    proxies = fs.readFileSync(proxyPath, 'utf-8')
-      .split('\n')
-      .map(line => line.trim())
-      .filter(line => line && !line.startsWith('#'));
-    console.log(`[YT-DLP] Carregados ${proxies.length} proxies.`);
-  }
-} catch (e) {
-  console.warn('[YT-DLP] Erro ao ler proxies.txt:', e.message);
-}
-
-function getRandomProxy() {
-  if (proxies.length === 0) return null;
-  return proxies[Math.floor(Math.random() * proxies.length)];
-}
-
-async function runYtDlp(args, options = {}, retryCount = 0) {
-  const cookieArgs = getCookieArgs();
-
-  // Na primeira tentativa, avisa sobre cookies
-  if (retryCount === 0) {
-    if (cookieArgs.length > 0) {
-      console.log(`[YT-DLP] Using cookies configuration`);
-    } else {
-      console.warn('[YT-DLP] ⚠️ No cookies configured! YouTube may block requests.');
-    }
-  }
-
-  let finalArgs = [...cookieArgs, ...args];
-
-  // Se for retry e tiver proxy, adiciona
-  if (options.proxyUrl) {
-    console.log(`[YT-DLP] 🔄 Tentativa ${retryCount} usando proxy: ${options.proxyUrl}`);
-    finalArgs.push('--proxy', options.proxyUrl);
-  }
-
+async function runYtDlp(args, options = {}) {
   try {
-    // (Removida a simulação forçada de erro 429 para testar proxy)
-
-    return await runProcess('yt-dlp', finalArgs, options);
+    return await runProcess('yt-dlp', args, options);
   } catch (err) {
-    const errorMsg = (err.stderr || err.message || '').toLowerCase();
-
-    // Erros conhecidos que justificam uso de proxy
-    const isBlockingError =
-      errorMsg.includes('sign in to confirm') ||
-      errorMsg.includes('bot') ||
-      errorMsg.includes('429') ||
-      errorMsg.includes('403') ||
-      errorMsg.includes('forbidden');
-
-    // Se for erro de bloqueio e tiver proxies disponíveis (max 3 retries)
-    if (isBlockingError && proxies.length > 0 && retryCount < 3) {
-      console.warn(`[YT-DLP] ⚠️ Bloqueio detectado! Tentando proxy (Attempt ${retryCount + 1}/3)...`);
-
-      const proxy = getRandomProxy();
-      const newOptions = { ...options, proxyUrl: proxy };
-
-      return runYtDlp(args, newOptions, retryCount + 1);
-    }
-
     throw err;
   }
 }
@@ -150,4 +74,4 @@ async function downloadForDiscord(videoId, streamUrl, outputPath) {
   }
 }
 
-module.exports = { runYtDlp, runYtDlpJson, downloadAudio, getCookieArgs, downloadForDiscord };
+module.exports = { runYtDlp, runYtDlpJson, downloadAudio, downloadForDiscord };
