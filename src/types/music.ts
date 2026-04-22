@@ -7,6 +7,8 @@ export interface SongMetadata {
   artist?: string;
   track?: string;
   spotifyId?: string;
+  source?: string;
+  [key: string]: any;
 }
 
 export interface Song {

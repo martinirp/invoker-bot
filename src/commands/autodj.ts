@@ -1,7 +1,6 @@
 // @ts-nocheck
 const { createEmbed } = require('../utils/embed');
 const queueManager = require('../utils/queueManager');
-const db = require('../utils/db');
 const { getRelatedVideos } = require('../utils/youtubeApi');
 
 async function execute(message) {
@@ -29,7 +28,6 @@ async function execute(message) {
   });
 
   try {
-    // Buscar 5 vídeos relacionados à música atual
     const related = await getRelatedVideos(g.current.videoId, 5);
 
     if (!related || related.length === 0) {
@@ -39,12 +37,10 @@ async function execute(message) {
     let added = 0;
 
     for (const video of related) {
-      // Verificar se já está na fila
       const alreadyInQueue = g.queue.some(s => s.videoId === video.videoId);
       if (alreadyInQueue) continue;
 
-      // Adicionar à fila
-      const song = db.getByVideoId(video.videoId) || {
+      const song = {
         videoId: video.videoId,
         title: video.title,
         metadata: {
@@ -78,17 +74,15 @@ async function execute(message) {
         }
       ]
     });
-    // Coletor para o botão de skip
+    
     const filter = i => i.customId === 'autodj_skip' && i.user.id === message.author.id;
     const collector = statusMsg.createMessageComponentCollector({ filter, time: 60000 });
 
     collector.on('collect', async i => {
       if (i.deferred || i.replied) return;
       await i.deferUpdate();
-      // Executa o comando skip
       const skipCmd = require('./skip');
       await skipCmd.execute(message);
-      // Remove os botões após o uso
       await statusMsg.edit({ components: [] }).catch(() => {});
     });
   } catch (error) {

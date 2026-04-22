@@ -6,7 +6,7 @@
  * Só permite covers se o usuário explicitamente pediu na query.
  */
 
-// Padrões comuns que indicam que um vídeo é um cover
+// Padrões comuns que indicam que um vídeo é um cover ou versão indesejada
 const COVER_PATTERNS = [
     /\bcover\b/i,
     /\[cover\]/i,
@@ -22,7 +22,28 @@ const COVER_PATTERNS = [
     /\bkaraoke\b/i,
     /\btribute\b/i,
     /\bin the style of\b/i,
-    /\bcovers\b/i
+    /\bcovers\b/i,
+    /\bfanmade\b/i,
+    /\bfan-made\b/i,
+    /\bparody\b/i,
+    /\bparódia\b/i,
+    /\bnightcore\b/i,
+    /\bversion cover\b/i,
+    /\bversão cover\b/i,
+    /\bremix\b/i,
+    /\barrangement\b/i,
+    /\btutorial\b/i,
+    /\blesson\b/i,
+    /\bhow to play\b/i,
+    /\bsynthesia\b/i,
+    /\bmedley\b/i,
+    /\bmashup\b/i,
+    /\bslowed\b/i,
+    /\breverb\b/i,
+    /\b8d audio\b/i,
+    /\blofi\b/i,
+    /\blo-fi\b/i,
+    /\bchipmunk\b/i
 ];
 
 /**

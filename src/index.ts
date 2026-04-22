@@ -122,15 +122,11 @@ const { Client, Collection, GatewayIntentBits, Events } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
-const db = require('./utils/db');
-const cachePath = require('./utils/cachePath');
 const queueManager = require('./utils/queueManager');
 const { createEmbed, createSongEmbed } = require('./utils/embed');
 const { resolve } = require('./utils/resolver');
 const { ActionRowBuilder, ButtonBuilder, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const { Worker } = require('worker_threads'); // Integration: Worker
-const { removeSongCompletely } = require('./utils/removeSong');
-const { startCacheMonitor } = require('./utils/cacheMonitor');
 const { LootSplitter } = require('./utils/lootSplitter');
 
 // ===============================================
@@ -177,7 +173,7 @@ if (!token) {
 client.commands = new Collection();
 const commandPath = path.join(__dirname, 'commands');
 
-for (const file of fs.readdirSync(commandPath).filter(f => f.endsWith('.js'))) {
+for (const file of fs.readdirSync(commandPath).filter(f => f.match(/\.[jt]s$/))) {
   const command = require(path.join(commandPath, file));
   if (!command.name) continue;
 
@@ -196,10 +192,6 @@ console.log(`✅ Comandos carregados: ${client.commands.size}`);
 // ===============================================
 client.once(Events.ClientReady, c => {
   console.log(`✅ Bot online como ${c.user.tag}`);
-  // iniciar monitor de cache assíncrono (não bloqueante)
-  try { startCacheMonitor(); } catch (e) {
-    console.error('[CACHE MONITOR] erro ao iniciar:', e.message);
-  }
 });
 
 // ===============================================
@@ -706,94 +698,9 @@ client.on(Events.InteractionCreate, async interaction => {
       }
     }
 
-    if (interaction.isButton() && interaction.customId === 'lib_search') {
-      return interaction.showModal({
-        title: 'Buscar música',
-        custom_id: 'lib_search_modal',
-        components: [{
-          type: 1,
-          components: [{
-            type: 4,
-            custom_id: 'query',
-            label: 'Nome da música',
-            style: 1,
-            required: true
-          }]
-        }]
-      });
-    }
-
-
-    if (interaction.isModalSubmit() && interaction.customId === 'lib_search_modal') {
-      const query = interaction.fields.getTextInputValue('query');
-      const results = db.searchSongs(query);
-
-      if (!results.length) {
-        return interaction.reply({ content: '❌ Nenhuma música encontrada.', ephemeral: true });
-      }
-
-      const song = results[0];
-
-      return interaction.reply({
-        embeds: [{
-          title: '🎵 Música encontrada',
-          description: `**${song.title}**`,
-          fields: [
-            { name: 'VideoId', value: song.videoId },
-            { name: 'Arquivo', value: fs.existsSync(song.file) ? '✅ Cache OK' : '❌ Não existe' }
-          ],
-          color: 0x5865F2
-        }],
-        components: [{
-          type: 1,
-          components: [
-            { type: 2, style: 1, label: 'Tocar', emoji: '▶️', custom_id: `lib_play_${song.videoId}` },
-            { type: 2, style: 4, label: 'Excluir', emoji: '❌', custom_id: `lib_delete_${song.videoId}` }
-          ]
-        }]
-      });
-    }
-
-    if (interaction.isButton() && interaction.customId.startsWith('lib_play_')) {
-      const videoId = interaction.customId.replace('lib_play_', '');
-      const song = db.getByVideoId(videoId);
-
-      if (!song || !fs.existsSync(song.file)) {
-        return interaction.reply({ content: '❌ Cache não encontrado.', ephemeral: true });
-      }
-
-      const vc = interaction.member.voice.channel;
-      if (!vc) {
-        return interaction.reply({ content: '❌ Entre em um canal de voz.', ephemeral: true });
-      }
-
-      if (resettingGuilds.has(interaction.guild.id)) {
-        return interaction.reply({ content: '⏳ Bot está se reorganizando.', ephemeral: true });
-      }
-
-      await interaction.reply({ content: '▶️ Tocando do cache...', ephemeral: true });
-
-      return queueManager.play(
-        interaction.guild.id,
-        vc,
-        { videoId: song.videoId, title: song.title, file: song.file },
-        interaction.channel
-      );
-    }
-
-    // loop button removed (using reaction toggle instead)
-
-    if (interaction.isButton() && interaction.customId.startsWith('lib_delete_')) {
-      const videoId = interaction.customId.replace('lib_delete_', '');
-      const ok = removeSongCompletely(videoId);
-
-      return interaction.reply({
-        content: ok
-          ? '❌ Música removida completamente (cache + banco).'
-          : '❌ Música não encontrada.',
-        ephemeral: true
-      });
-    }
+    // ===============================================
+    // 🔗 EXTERNAL COMMANDS
+    // ===============================================
 
     // Confirmação para mensagens externas "!p": pega a query armazenada e toca
     if (interaction.isButton() && interaction.customId === 'external_p_ok') {
@@ -926,57 +833,6 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
 // 🧾 REACTIONS (loop toggle via 🔁)
 // ===============================================
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
-  // Download command reactions (1️⃣, 2️⃣, 3️⃣)
-  if (['1️⃣', '2️⃣', '3️⃣'].includes(reaction.emoji.name)) {
-    console.log('[DOWNLOAD REACTION] Reação detectada:', reaction.emoji.name, 'por usuário:', user.id);
-
-    const message = reaction.message;
-    if (!message || !message.guild) {
-      console.log('[DOWNLOAD REACTION] Mensagem ou guild inválida');
-      return;
-    }
-
-    // Verificar se é uma mensagem de download pendente
-    const downloadData = global.downloadPendingMessages?.get(message.id);
-    console.log('[DOWNLOAD REACTION] downloadData:', downloadData ? 'encontrado' : 'não encontrado');
-    console.log('[DOWNLOAD REACTION] global.downloadPendingMessages size:', global.downloadPendingMessages?.size || 0);
-
-    if (!downloadData) return; // Não é uma mensagem de download
-
-    // Verificar se é o autor correto
-    if (user.bot || user.id !== downloadData.authorId) {
-      console.log('[DOWNLOAD REACTION] Usuário não autorizado ou é bot');
-      try { await reaction.users.remove(user.id); } catch { }
-      return;
-    }
-
-    const idx = ['1️⃣', '2️⃣', '3️⃣'].indexOf(reaction.emoji.name);
-    const selected = downloadData.detailed[idx];
-
-    if (!selected) {
-      console.log('[DOWNLOAD REACTION] Seleção inválida, idx:', idx);
-      return;
-    }
-
-    console.log('[DOWNLOAD REACTION] Iniciando download de:', selected.title);
-
-    // Limpar mensagem pendente
-    global.downloadPendingMessages.delete(message.id);
-
-    // Remover todas as reações
-    try { await message.reactions.removeAll(); } catch { }
-
-    // Executar download
-    const downloadCommand = client.commands.get('dl');
-    if (downloadCommand && downloadCommand.performDownload) {
-      await downloadCommand.performDownload(selected.videoId, selected.title, message.channel);
-    } else {
-      console.error('[DOWNLOAD REACTION] Comando download não encontrado ou performDownload não existe');
-    }
-
-    return;
-  }
-
   // Remove (❌, 1️⃣ a 🔟) — handler para remoção na fila
 
   if (reaction.emoji.name === '❌' || ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'].includes(reaction.emoji.name)) {

@@ -2,7 +2,6 @@
 const { createEmbed } = require('../utils/embed');
 const { resolve } = require('../utils/resolver');
 const queueManager = require('../utils/queueManager');
-const db = require('../utils/db');
 
 const {
   isYoutubeLink,
@@ -52,123 +51,35 @@ async function execute(message) {
   const query = message.content.split(' ').slice(1).join(' ').trim();
   if (!query) return;
 
+  // ⚡ CONEXÃO ANTECIPADA: Entra no canal imediatamente enquanto resolve a música
+  queueManager.ensureConnection(guildId, voiceChannel);
+
   const statusMsg = await textChannel.send({
     embeds: [createEmbed().setDescription('🔍 Processando…')]
   });
 
   try {
     // =====================================================
-    // 🎵 SPOTIFY LINK (busca no YouTube via metadata)
+    // 🎵 SPOTIFY LINK
     // =====================================================
     if (isSpotifyLink(query)) {
       console.log('[PLAYNOW] Detectado link Spotify, resolvendo metadata...');
 
       const spotifyData = await resolveSpotifyTrack(query);
-      
       if (!spotifyData) {
-        throw new Error('Não foi possível resolver o link do Spotify. Tente novamente.');
+        throw new Error('Não foi possível resolver o link do Spotify.');
       }
 
-      // Busca a música no YouTube usando artista + título
       console.log(`[PLAYNOW] Buscando no YouTube: "${spotifyData.query}"`);
       const result = await resolve(spotifyData.query);
 
-      const song = result.fromCache
-        ? db.getByVideoId(result.videoId)
-        : { videoId: result.videoId, title: spotifyData.query, metadata: { spotifyId: spotifyData.trackId } };
-
-      // Se veio do banco mas não tiver spotifyId, adicionamos para futuras recomendações
-      if (song && song.metadata && !song.metadata.spotifyId && spotifyData.trackId) {
-        song.metadata.spotifyId = spotifyData.trackId;
-      }
-
-      await queueManager.playNow(
-        guildId,
-        voiceChannel,
-        song,
-        textChannel
-      );
-
-      await statusMsg.edit({
-        embeds: [
-          createEmbed()
-            .setDescription(`✅ Próximo: **${spotifyData.title}** por **${spotifyData.artist}**`)
-        ]
-      });
-
-      return;
-    }
-
-    // =====================================================
-    // 🔗 LINK DO YOUTUBE
-    // =====================================================
-    if (isYoutubeLink(query)) {
-      const video = await resolveVideo(query);
-
-      const dbSong = db.getByVideoId(video.videoId);
-      // Usar o título resolvido atual para evitar títulos antigos/limpos em excesso
-      let song = dbSong
-        ? { ...dbSong, title: video.title || dbSong.title }
-        : { videoId: video.videoId, title: video.title };
-
-      await queueManager.playNow(
-        guildId,
-        voiceChannel,
-        song,
-        textChannel
-      );
-
-      await statusMsg.edit({
-        embeds: [
-          createEmbed()
-            .setDescription(`✅ Próximo a tocar: **${song.title}**`)
-        ]
-      });
-
-      return;
-    }
-
-    // =====================================================
-    // 🔗 OUTRAS FONTES (SoundCloud/Bandcamp/Direct URLs)
-    // =====================================================
-    const sourceType = detectSourceType(query);
-    
-    if (sourceType !== 'search' && sourceType !== 'youtube') {
-      const { runYtDlpJson } = require('../utils/ytDlp');
-
-      let video;
-      try {
-        const data = await runYtDlpJson([
-          '--dump-json',
-          '--no-playlist',
-          query
-        ]);
-        video = {
-          videoId: data.id || require('crypto').createHash('md5').update(query).digest('hex'),
-          title: data.title || 'Áudio externo',
-          channel: data.uploader || sourceType
-        };
-      } catch (err) {
-        console.error('[PLAYNOW] erro ao resolver URL:', err);
-        video = {
-          videoId: require('crypto').createHash('md5').update(query).digest('hex'),
-          title: query.split('/').pop() || 'Áudio externo',
-          channel: sourceType
-        };
-      }
-
-      let song = db.getByVideoId(video.videoId) || {
-        videoId: video.videoId,
-        title: video.title,
-        streamUrl: query
+      const song = { 
+        videoId: result.videoId, 
+        title: result.title || spotifyData.query, 
+        metadata: { ...result.metadata, spotifyId: spotifyData.trackId } 
       };
 
-      await queueManager.playNow(
-        guildId,
-        voiceChannel,
-        song,
-        textChannel
-      );
+      await queueManager.playNow(guildId, voiceChannel, song, textChannel);
 
       await statusMsg.edit({
         embeds: [
@@ -181,20 +92,31 @@ async function execute(message) {
     }
 
     // =====================================================
+    // 🔗 LINK DO YOUTUBE
+    // =====================================================
+    if (isYoutubeLink(query)) {
+      const video = await resolveVideo(query);
+      const song = { videoId: video.videoId, title: video.title };
+
+      await queueManager.playNow(guildId, voiceChannel, song, textChannel);
+
+      await statusMsg.edit({
+        embeds: [
+          createEmbed()
+            .setDescription(`✅ Próximo a tocar: **${song.title}**`)
+        ]
+      });
+
+      return;
+    }
+
+    // =====================================================
     // 🔍 SEARCH NORMAL
     // =====================================================
     const result = await resolve(query);
+    const song = { videoId: result.videoId, title: result.title, metadata: result.metadata };
 
-    const song = result.fromCache
-      ? db.getByVideoId(result.videoId)
-      : { videoId: result.videoId, title: result.title };
-
-    await queueManager.playNow(
-      guildId,
-      voiceChannel,
-      song,
-      textChannel
-    );
+    await queueManager.playNow(guildId, voiceChannel, song, textChannel);
 
     await statusMsg.edit({
       embeds: [
@@ -204,7 +126,6 @@ async function execute(message) {
     });
   } catch (err) {
     console.error('[PLAYNOW] Erro:', err);
-    
     await statusMsg.edit({
       embeds: [
         createEmbed()
@@ -214,6 +135,15 @@ async function execute(message) {
     }).catch(() => {});
   }
 }
+
+module.exports = {
+  name: 'playnow',
+  aliases: ['pn', 'pnow', 'next'],
+  description: 'Coloca uma música como próxima a tocar (requer privilégios)',
+  usage: '#playnow <nome ou link> | #pn <nome ou link> | %pn <nome ou link>',
+  permissions: ['ADMINISTRATOR'],
+  execute
+};
 
 module.exports = {
   name: 'playnow',

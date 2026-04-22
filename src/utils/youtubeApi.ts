@@ -59,9 +59,9 @@ async function ytSearchBasic(query, count = 1) {
  * @returns {Promise<{videoId: string, title: string, channel: string, thumbnail: string, channelId: string}|null>}
  */
 async function searchYouTube(query) {
-  // Sempre usa yt-dlp para busca (gratuito, sem quota)
+  // Busca até 3 resultados para filtrar covers e pegar o melhor original
   const lf = await searchViaLastFM(query);
-  const res = await ytSearchBasic(lf || query, 1);
+  const res = await ytSearchBasic(lf || query, 3);
   return res ? res[0] : null;
 }
 

@@ -5,6 +5,7 @@ import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 
 // Inicia o updater em background como processo separado
+/* 
 const updaterScript = path.join(__dirname, '../updater.js');
 const updaterProcess = spawn('node', [updaterScript], {
   detached: true,
@@ -12,6 +13,7 @@ const updaterProcess = spawn('node', [updaterScript], {
   cwd: process.cwd()
 });
 updaterProcess.unref();
+*/
 
 const RESTART_DELAY = 3000; // Delay antes de reiniciar (ms)
 const MAX_RESTARTS = 10; // Máximo de restarts consecutivos
@@ -40,7 +42,8 @@ function shouldRestart(): boolean {
 }
 
 function startBot(): void {
-  const botScript = path.join(__dirname, 'index.js');
+  // Resolve o index.js na pasta dist (raiz do projeto/dist/index.js)
+  const botScript = path.join(process.cwd(), 'dist', 'index.js');
 
   console.log(`\n🚀 [MANAGER] Iniciando bot (attempt ${restartCount})...`);
 

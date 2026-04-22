@@ -18,10 +18,8 @@ import type { Song } from '../types/music';
 // CommonJS-style imports
 const { createEmbed, createSongEmbed } = require('./embed');
 const { resolve, tokenize } = require('./resolver');
-const cachePath = require('./cachePath') as (id: string) => string;
-const downloadQueue = require('./downloadQueue');
+const { createYtDlpStream } = require('./ytDlp');
 const { getVideoDetails } = require('./youtubeApi');
-const { isValidOggOpus } = require('./validator');
 
 type SendableChannel = { send: (...args: any[]) => any } | null;
 type VoiceCh = any; // Simplified; could be VoiceBasedChannel but keep loose to match runtime
@@ -145,29 +143,13 @@ class QueueManager {
     return this.guilds.get(guildId)!;
   }
 
-  async play(guildId: string, voiceChannel: VoiceCh, song: Song, textChannel?: SendableChannel) {
+  /**
+   * Garante que o bot está conectado ao canal de voz (adianta a conexão)
+   */
+  ensureConnection(guildId: string, voiceChannel: VoiceCh) {
     const g = this.get(guildId);
-
-    if (textChannel) g.textChannel = textChannel;
-    g.voiceChannel = voiceChannel;
-
-    song.file = song.file || cachePath(song.videoId);
-
-    // Verificar o estado REAL do player, não apenas a flag
-    const playerStatus = g.player?.state?.status;
-    const isPlayerActive = playerStatus === AudioPlayerStatus.Playing || playerStatus === AudioPlayerStatus.Buffering;
-    const wasPlaying = g.playing && isPlayerActive;
-
-    const queueSize = g.queue.length;
-    console.log(`[QUEUE] ${guildId} → adicionando: ${song.title} (playing=${wasPlaying}, playerStatus=${playerStatus}, queue_size=${queueSize})`);
-    g.queue.push(song);
-    console.log(`[QUEUE] ${guildId} → fila agora tem ${g.queue.length} músicas`);
-
-    if (!fs.existsSync(song.file)) {
-      downloadQueue.enqueue(guildId, song);
-    }
-
     if (!g.connection) {
+      console.log(`[VOICE] ⚡ Conexão antecipada em ${guildId}`);
       g.connection = joinVoiceChannel({
         channelId: voiceChannel.id,
         guildId,
@@ -175,6 +157,27 @@ class QueueManager {
       });
       g.connection.subscribe(g.player);
     }
+    return g.connection;
+  }
+
+  async play(guildId: string, voiceChannel: VoiceCh, song: Song, textChannel?: SendableChannel) {
+    const g = this.get(guildId);
+
+    if (textChannel) g.textChannel = textChannel;
+    g.voiceChannel = voiceChannel;
+
+    // Conectar se necessário (adiantado ou fallback)
+    this.ensureConnection(guildId, voiceChannel);
+
+    // Verificar o estado REAL do player, não apenas a flag
+    const playerStatus = g.player?.state?.status;
+    const isPlayerActive = (playerStatus === AudioPlayerStatus.Playing || playerStatus === AudioPlayerStatus.Buffering);
+    const wasPlaying = g.playing && isPlayerActive;
+
+    const queueSize = g.queue.length;
+    console.log(`[QUEUE] ${guildId} → adicionando: ${song.title} (playing=${wasPlaying}, playerStatus=${playerStatus}, queue_size=${queueSize})`);
+    g.queue.push(song);
+    console.log(`[QUEUE] ${guildId} → fila agora tem ${g.queue.length} músicas`);
 
     // IMPORTANTE: Só toca automaticamente se NÃO estava tocando nada
     if (!wasPlaying) {
@@ -192,7 +195,6 @@ class QueueManager {
     if (textChannel) g.textChannel = textChannel;
     g.voiceChannel = voiceChannel;
 
-    song.file = song.file || cachePath(song.videoId);
 
     // Verificar o estado REAL do player, não apenas a flag
     const playerStatus = g.player?.state?.status;
@@ -205,18 +207,11 @@ class QueueManager {
     g.queue.unshift(song);
     console.log(`[PLAYNOW] ${guildId} → fila agora tem ${g.queue.length} músicas`);
 
-    if (!fs.existsSync(song.file)) {
-      downloadQueue.enqueue(guildId, song);
-    }
 
-    if (!g.connection) {
-      g.connection = joinVoiceChannel({
-        channelId: voiceChannel.id,
-        guildId,
-        adapterCreator: voiceChannel.guild.voiceAdapterCreator
-      });
-      g.connection.subscribe(g.player);
-    }
+    // Conectar se necessário (adiantado ou fallback)
+    this.ensureConnection(guildId, voiceChannel);
+
+    // Não interromper a música atual: se já estiver tocando, apenas mantém na frente da fila
 
     // Não interromper a música atual: se já estiver tocando, apenas mantém na frente da fila
     if (wasPlaying) {
@@ -288,37 +283,58 @@ class QueueManager {
 
     let resource;
 
-    try {
-      const finalFile = await downloadQueue.awaitDownload(song, g.textChannel);
-      song.file = finalFile;
-      const absPath = path.resolve(finalFile);
+    // ─── Stream direto para fontes CDN (ex: Suno) ────────────────────────────
+    const isSunoSource = song.metadata?.source === 'suno';
+    const hasDirectStreamUrl = song.streamUrl && /^https?:\/\/.+\.(mp3|ogg|opus|wav|m4a)/i.test(song.streamUrl);
 
-      if (!fs.existsSync(absPath) || !isValidOggOpus(absPath)) {
-        throw new Error(`Arquivo inválido ou não encontrado após download: ${absPath}`);
+    if (isSunoSource && hasDirectStreamUrl) {
+      try {
+        console.log(`[PLAYBACK][${guildId}] src=direct-stream url=${song.streamUrl}`);
+        resource = createAudioResource(song.streamUrl, { inputType: StreamType.Arbitrary });
+        g.currentStream = null;
+      } catch (err) {
+        console.error(`[PLAYBACK] Falha ao criar stream direto:`, err);
+        if (!g.failedAttempts) g.failedAttempts = new Map();
+        const attempts = g.failedAttempts.get(song.videoId) || 0;
+        g.failedAttempts.set(song.videoId, attempts + 1);
+        this.next(guildId);
+        return;
       }
 
-      console.log(`[PLAYBACK][${guildId}] src=download file=${absPath}`);
-      resource = createAudioResource(absPath, { inputType: StreamType.OggOpus });
-      g.currentStream = null;
-    } catch (err) {
-      console.error(`[PLAYBACK] Falha ao baixar ou tocar:`, err);
-      if (!g.failedAttempts) g.failedAttempts = new Map();
-      const attempts = g.failedAttempts.get(song.videoId) || 0;
-      g.failedAttempts.set(song.videoId, attempts + 1);
-      this.next(guildId);
-      return;
+    // ─── Stream via yt-dlp (sem download em disco) ────────────────────────────
+    } else {
+      try {
+        const target = song.streamUrl || song.videoId;
+        if (!target) throw new Error('Música sem videoId ou streamUrl');
+
+        console.log(`[PLAYBACK][${guildId}] src=yt-dlp-stream target=${target}`);
+        const { stream, process: ytProcess } = createYtDlpStream(target);
+
+        // Guardar referência ao processo para poder matar no skip
+        g.currentStream = ytProcess;
+
+        resource = createAudioResource(stream, { inputType: StreamType.Arbitrary });
+      } catch (err) {
+        console.error(`[PLAYBACK] Falha ao criar yt-dlp stream:`, err);
+        if (!g.failedAttempts) g.failedAttempts = new Map();
+        const attempts = g.failedAttempts.get(song.videoId) || 0;
+        g.failedAttempts.set(song.videoId, attempts + 1);
+        this.next(guildId);
+        return;
+      }
     }
 
     // Garantir conexão pronta antes de tocar (reduz silêncio inicial)
     try {
       if (g.connection) {
-        await entersState(g.connection, VoiceConnectionStatus.Ready, 3000);
+        // Aumentado para 10s para redes mais lentas ou primeira conexão
+        await entersState(g.connection, VoiceConnectionStatus.Ready, 10000);
       }
     } catch (e) {
-      console.warn('[VOICE] conexão não ficou pronta em 3s; iniciando mesmo assim');
+      console.warn('[VOICE] conexão não ficou pronta em 10s; iniciando mesmo assim');
     }
 
-    console.log(`[PLAYBACK][${guildId}] player.play(inputType=OggOpus)`);
+    console.log(`[PLAYBACK][${guildId}] player.play(inputType=Arbitrary)`);
     g.player.play(resource);
 
     // Evitar múltiplos listeners acumulados
@@ -424,13 +440,35 @@ class QueueManager {
       try { g.textChannel?.send({ embeds: [createSongEmbed(baseSongData, 'playing', false, false)] }); } catch { }
     }
 
-    // 🟢 Prefetch próxima música se existir na fila
-    if (g.queue.length > 0) {
-      const nextSong = g.queue[0];
-      if (nextSong && !fs.existsSync(nextSong.file)) {
-        console.log(`[PREFETCH] ${guildId} → pré-baixando próxima: ${nextSong.title}`);
-        downloadQueue.enqueue(guildId, nextSong);
+    // Iniciar prefetch da próxima música para acelerar a transição
+    this.prefetch(guildId);
+  }
+
+  /**
+   * Resolve antecipadamente a próxima música da fila em background
+   */
+  async prefetch(guildId: string) {
+    const g = this.get(guildId);
+    if (g.queue.length === 0) return;
+
+    const nextSong = g.queue[0];
+    
+    // Se já tem videoId e metadados básicos, não precisa prefetch (ou já foi feito)
+    if (nextSong.videoId && nextSong.metadata?.views) return;
+
+    console.log(`[PREFETCH][${guildId}] Adiantando resolução de: ${nextSong.title}`);
+    
+    try {
+      const res = await resolve(nextSong.title);
+      if (res && res.videoId) {
+        // Atualizar objeto na fila sem removê-lo
+        nextSong.videoId = res.videoId;
+        nextSong.title = res.title;
+        nextSong.metadata = { ...nextSong.metadata, ...res.metadata };
+        console.log(`[PREFETCH][${guildId}] ✅ Resolvido com sucesso: ${res.videoId}`);
       }
+    } catch (e) {
+      console.warn(`[PREFETCH][${guildId}] ⚠️ Falha ao pre-resolver:`, e.message);
     }
   }
 
@@ -440,32 +478,11 @@ class QueueManager {
   async ensureNextReady(guildId: string, timeoutMs: number = 10000): Promise<'ready' | 'timeout' | 'none'> {
     const g = this.get(guildId);
     if (!g.queue.length) return 'none'; // Nada na fila
-
-    const nextSong = g.queue[0];
-    const filePath = nextSong.file || cachePath(nextSong.videoId);
-    const partPath = `${filePath}.part`;
-
-    // Se já existe e é válido, ok
-    if (fs.existsSync(filePath) && isValidOggOpus(filePath)) return 'ready';
-
-    // Se não está baixando, força
-    if (!fs.existsSync(partPath) && !fs.existsSync(filePath)) {
-      console.log(`[SAFE-SKIP] ${guildId} → Forçando download de ${nextSong.title}`);
-      downloadQueue.enqueue(guildId, nextSong);
-    }
-
-    console.log(`[SAFE-SKIP] ${guildId} → Aguardando próximo arquivo...`);
-    const start = Date.now();
-
-    while (Date.now() - start < timeoutMs) {
-      if ((fs.existsSync(filePath) && isValidOggOpus(filePath)) ||
-        (fs.existsSync(partPath) && fs.statSync(partPath).size > 64 * 1024)) { // Pelo menos 64kb de header
-        return 'ready';
-      }
-      await new Promise(r => setTimeout(r, 500));
-    }
-    return 'timeout';
+    
+    // Sem download em disco, consideramos sempre pronto para streaming
+    return 'ready';
   }
+
 
   pause(guildId: string) {
     const g = this.guilds.get(guildId);
@@ -489,7 +506,12 @@ class QueueManager {
     const g = this.get(guildId);
 
     if (g.currentStream) {
-      try { g.currentStream.destroy(); } catch { }
+      try {
+        // currentStream é um ChildProcess (yt-dlp); usa kill() para encerrá-lo
+        if (typeof g.currentStream.kill === 'function') g.currentStream.kill();
+        else if (typeof g.currentStream.destroy === 'function') g.currentStream.destroy();
+      } catch { }
+      g.currentStream = null;
     }
 
     this.next(guildId);
@@ -505,10 +527,12 @@ class QueueManager {
     }
 
     if (g.currentStream) {
-      try { g.currentStream.destroy(); } catch { }
+      try {
+        if (typeof g.currentStream.kill === 'function') g.currentStream.kill();
+        else if (typeof g.currentStream.destroy === 'function') g.currentStream.destroy();
+      } catch { }
+      g.currentStream = null;
     }
-
-    downloadQueue.resetGuild(guildId);
 
     try { g.player.stop(true); } catch { }
     try { g.connection?.destroy(); } catch { }
@@ -754,22 +778,13 @@ class QueueManager {
         if (recArtist) artistCount.set(recArtist, (artistCount.get(recArtist) || 0) + 1);
 
         // Add to queue
-        const dbSong = require('./db').getByVideoId(videoId);
-        const songObj = dbSong || {
+        const songObj = {
           videoId: videoId,
           title: rec.title,
           metadata: { channel: rec.source }
         };
 
         g.queue.push(songObj);
-
-        // Enqueue download
-        const downloadQueue = require('./downloadQueue');
-        const fs = require('fs');
-        const filePath = songObj.file || require('./cachePath')(videoId);
-        if (!fs.existsSync(filePath)) {
-          downloadQueue.enqueue(guildId, songObj);
-        }
 
         added++;
       }
@@ -1098,9 +1113,8 @@ class QueueManager {
             continue;
           }
 
-          // Get from DB or create new song object
-          const dbSong = require('./db').getByVideoId(resolved.videoId);
-          const songObj = dbSong || {
+          // Create new song object
+          const songObj = {
             videoId: resolved.videoId,
             title: resolved.title || track,
             metadata: resolved.metadata
@@ -1109,13 +1123,6 @@ class QueueManager {
           // Add to queue
           g.queue.push(songObj);
           console.log(`[ARTIST MIX] ✅ Adicionado: "${songObj.title}"`);
-
-          // Enqueue download if not cached
-          const fs = require('fs');
-          const filePath = songObj.file || require('./cachePath')(resolved.videoId);
-          if (!fs.existsSync(filePath)) {
-            require('./downloadQueue').enqueue(guildId, songObj);
-          }
 
           added++;
         } catch (err) {

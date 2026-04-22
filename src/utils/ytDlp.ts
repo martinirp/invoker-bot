@@ -1,5 +1,11 @@
 // @ts-nocheck
 const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+
+// Tenta encontrar o executável local (Windows ou Linux) ou usa do PATH
+const localYtDlp = path.join(process.cwd(), process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp');
+const YT_DLP_BIN = fs.existsSync(localYtDlp) ? localYtDlp : 'yt-dlp';
 
 function runProcess(cmd, args, options = {}) {
   return new Promise((resolve, reject) => {
@@ -28,7 +34,7 @@ function runProcess(cmd, args, options = {}) {
 async function runYtDlp(args, options = {}) {
   const defaultArgs = ['--js-runtimes', 'node'];
   try {
-    return await runProcess('yt-dlp', [...defaultArgs, ...args], options);
+    return await runProcess(YT_DLP_BIN, [...defaultArgs, ...args], options);
   } catch (err) {
     throw err;
   }
@@ -39,40 +45,49 @@ async function runYtDlpJson(args, options = {}) {
   return JSON.parse(stdout);
 }
 
-
 /**
- * Baixa o áudio de um vídeo do YouTube com bitrate especificado usando yt-dlp.
- * @param {string} videoId - ID do vídeo do YouTube
- * @param {number} bitrate - Bitrate desejado (ex: 128)
- * @param {string} outputPath - Caminho do arquivo de saída
- * @returns {Promise<void>}
+ * Cria um stream de áudio do YouTube via yt-dlp sem salvar em disco.
+ * O stdout do processo yt-dlp é retornado como um Readable stream
+ * e pode ser passado diretamente para createAudioResource() do @discordjs/voice.
+ *
+ * @param {string} videoIdOrUrl - ID do vídeo (ex: "dQw4w9WgXcQ") ou URL completa
+ * @param {object} [options]
+ * @param {string} [options.playerClient='android,ios'] - Player client do yt-dlp
+ * @returns {{ stream: Readable, process: ChildProcess }}
  */
-async function downloadAudio(videoId, bitrate, outputPath) {
-  // Exemplo: yt-dlp -f "bestaudio[abr<=128]" -o outputPath https://youtube.com/watch?v=videoId
-  const url = `https://youtube.com/watch?v=${videoId}`;
-  // O filtro de bitrate depende dos formatos disponíveis, mas abr<=bitrate cobre a maioria dos casos
-  const format = `bestaudio[abr<=${bitrate}]`;
-  const args = ['-f', format, '-o', outputPath, url];
-  await runYtDlp(args);
-}
+function createYtDlpStream(videoIdOrUrl, options = {}) {
+  const isUrl = /^https?:\/\//.test(videoIdOrUrl);
+  const url = isUrl ? videoIdOrUrl : `https://www.youtube.com/watch?v=${videoIdOrUrl}`;
+  const playerClient = options.playerClient || 'android,ios';
 
-async function downloadForDiscord(videoId, streamUrl, outputPath) {
-  const url = streamUrl || `https://youtube.com/watch?v=${videoId}`;
   const args = [
-    '-x',  // Extract audio
-    '--audio-format', 'opus',  // Convert to Opus
+    '--js-runtimes', 'node',
+    '-f', 'bestaudio/best',
+    '-x',
+    '--audio-format', 'opus',
+    '--audio-quality', '0',
     '--no-playlist',
-    // Force the exact output name dropping the auto-appended extension
-    '-o', outputPath,
+    '--no-warnings',
+    '--extractor-args', `youtube:player_client=${playerClient}`,
+    '-o', '-',   // redireciona áudio para stdout (sem salvar em disco)
     url
   ];
-  await runYtDlp(args);
-  
-  // yt-dlp sometimes creates "outputPath.opus". If so, rename it to exactly outputPath
-  const fs = require('fs');
-  if (!fs.existsSync(outputPath) && fs.existsSync(`${outputPath}.opus`)) {
-    fs.renameSync(`${outputPath}.opus`, outputPath);
-  }
+
+  const child = spawn(YT_DLP_BIN, args, { shell: false });
+
+  // Loga erros do yt-dlp sem crashar o processo
+  let stderrBuf = '';
+  child.stderr.on('data', d => {
+    stderrBuf += d.toString();
+  });
+  child.on('exit', (code) => {
+    if (code !== 0 && code !== null) {
+      console.error(`[YT-DLP STREAM] process exited with code ${code}: ${stderrBuf.slice(-300)}`);
+    }
+  });
+
+  return { stream: child.stdout, process: child };
 }
 
-module.exports = { runYtDlp, runYtDlpJson, downloadAudio, downloadForDiscord };
+module.exports = { runYtDlp, runYtDlpJson, createYtDlpStream };
+

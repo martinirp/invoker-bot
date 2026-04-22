@@ -35,4 +35,5 @@ yarn-error.log*
 
 # Database (if using SQLite locally)
 *.db
-*.sqlite
+# Local binaries
+yt-dlp.exe
