@@ -68,12 +68,27 @@ function createYtDlpStream(videoIdOrUrl, options = {}) {
     '--audio-quality', '0',
     '--no-playlist',
     '--no-warnings',
+    '--no-cache-dir',
+    '--buffer-size', '16K',
+    '--http-chunk-size', '10M',
     '--extractor-args', `youtube:player_client=${playerClient}`,
     '-o', '-',   // redireciona áudio para stdout (sem salvar em disco)
     url
   ];
 
   const child = spawn(YT_DLP_BIN, args, { shell: false });
+
+  // Evita crash por EPIPE se o yt-dlp fechar antes do bot
+  child.stdout.on('error', (err) => {
+    if (err.code === 'EPIPE') return;
+    console.error(`[YT-DLP STREAM] stdout error: ${err.message}`);
+  });
+  if (child.stdin) {
+    child.stdin.on('error', (err) => {
+      if (err.code === 'EPIPE') return;
+      console.error(`[YT-DLP STREAM] stdin error: ${err.message}`);
+    });
+  }
 
   // Loga erros do yt-dlp sem crashar o processo
   let stderrBuf = '';
@@ -82,7 +97,7 @@ function createYtDlpStream(videoIdOrUrl, options = {}) {
   });
   child.on('exit', (code) => {
     if (code !== 0 && code !== null) {
-      console.error(`[YT-DLP STREAM] process exited with code ${code}: ${stderrBuf.slice(-300)}`);
+      console.error(`[YT-DLP STREAM] process exited with code ${code} for ${videoIdOrUrl}: ${stderrBuf.slice(-300)}`);
     }
   });
 

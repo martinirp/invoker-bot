@@ -100,7 +100,7 @@ class QueueManager {
       const player = createAudioPlayer({
         behaviors: {
           noSubscriber: NoSubscriberBehavior.Pause,
-          maxMissedFrames: 10
+          maxMissedFrames: 25
         }
       });
 
@@ -109,10 +109,15 @@ class QueueManager {
         const audioErr = err as any;
         const code = audioErr?.code || audioErr?.name || 'player_error';
         const msg = audioErr?.message || '';
-        // Ignorar completamente "premature close" - deixar Idle handler cuidar
+        // Se o stream fechar prematuramente, tentamos avançar para não travar a fila
         if (code === 'ERR_STREAM_PREMATURE_CLOSE' || /premature/i.test(msg)) {
-          console.warn(`[PLAYER][${guildId}] aviso: fechamento prematuro (ignorado)`);
-          return; // NÃO avançar
+          console.warn(`[PLAYER][${guildId}] aviso: fechamento prematuro detectado, avançando para próxima...`);
+          try {
+            this.next(guildId);
+          } catch (e) {
+            console.error(`[PLAYER][${guildId}] erro ao avançar após premature close:`, e.message);
+          }
+          return;
         }
         // Erros críticos reais
         console.error(`[PLAYER][${guildId}] erro crítico:`, code, msg || err);

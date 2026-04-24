@@ -99,7 +99,7 @@ process.on('uncaughtException', (err) => {
   const msg = (err && typeof err === 'object' && 'message' in err) ? err.message : String(err);
   const code = (err && typeof err === 'object' && 'code' in err) ? err.code : '';
   if (code === 'ERR_STREAM_PREMATURE_CLOSE' || code === 'EPIPE' || /premature/i.test(msg) || /write EOF/i.test(msg) || code === 'EOF') {
-    console.warn('[GLOBAL] Ignorando fechamento prematuro de stream ou broken pipe:', msg);
+    console.warn(`[GLOBAL] Broken Pipe / Premature Close ignorado (trabalhando para recuperar playback): ${msg} (${code})`);
     return;
   }
   console.error('[GLOBAL] Uncaught exception:', err);
