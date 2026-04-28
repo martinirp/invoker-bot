@@ -85,14 +85,6 @@ process.on('SIGINT', () => {
 
 console.log('🎵 [MANAGER] Gerenciador de Bot iniciado. Monitorando restarts...\n');
 
-try {
-  console.log('🔨 [MANAGER] Executando build (npm run build)...');
-  const { execSync } = require('child_process');
-  execSync('npm run build', { stdio: 'inherit', cwd: process.cwd() });
-  console.log('✅ [MANAGER] Build concluído com sucesso!');
-} catch (error) {
-  console.error('❌ [MANAGER] Falha no build! Iniciando versão anterior se existir...', error.message);
-}
-
 startBot();
+
 
