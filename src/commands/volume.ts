@@ -18,7 +18,8 @@ async function execute(message, args) {
     }).catch(() => {});
   }
 
-  const volume = parseInt(args[0]);
+  const rawArg = (args[0] || '').trim().replace(/[^0-9.]/g, '');
+  const volume = Math.floor(parseFloat(rawArg));
 
   if (isNaN(volume) || volume < 1 || volume > 200) {
     return message.channel.send({
@@ -41,4 +42,3 @@ module.exports = {
   usage: '#volume [1-200]',
   execute
 };
-
