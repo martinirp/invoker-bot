@@ -106,9 +106,7 @@ async function resolve(query) {
     return currScore > prevScore ? curr : prev;
   });
 
-  console.log(`[RESOLVER] ✅ Selecionado: "${best.title}" [Score: Views=${best.views}]`);
-
-  return {
+  const finalResult = {
     fromCache: false,
     videoId: best.videoId,
     title: best.title,
@@ -122,11 +120,13 @@ async function resolve(query) {
     }
   };
 
+  console.log(`[RESOLVER] ✅ Selecionado: "${finalResult.title}" [Score: Views=${finalResult.metadata.views}]`);
+
   // Salvar no cache para uso futuro nesta sessão
   if (memoryCache.size > 500) memoryCache.clear(); // Limpeza básica se crescer demais
-  memoryCache.set(normalizedQuery, result);
+  memoryCache.set(normalizedQuery, finalResult);
 
-  return result;
+  return finalResult;
 }
 
 module.exports = { resolve };

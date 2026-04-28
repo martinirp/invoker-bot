@@ -28,35 +28,10 @@ async function execute(message) {
   });
 
   try {
-    const related = await getRelatedVideos(g.current.videoId, 5);
+    let added = await queueManager.addAutoRecommendations(guildId, 5);
 
-    if (!related || related.length === 0) {
-      throw new Error('Não foi possível encontrar músicas relacionadas.');
-    }
-
-    let added = 0;
-
-    for (const video of related) {
-      const alreadyInQueue = g.queue.some(s => s.videoId === video.videoId);
-      if (alreadyInQueue) continue;
-
-      const song = {
-        videoId: video.videoId,
-        title: video.title,
-        metadata: {
-          channel: video.channel,
-          thumbnail: video.thumbnail
-        }
-      };
-
-      await queueManager.play(
-        guildId,
-        g.voiceChannel,
-        song,
-        message.channel
-      );
-
-      added++;
+    if (added === 0) {
+      throw new Error('Não foi possível encontrar músicas relacionadas via Last.FM.');
     }
 
     await statusMsg.edit({

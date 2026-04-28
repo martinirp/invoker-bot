@@ -63,16 +63,16 @@ function createYtDlpStream(videoIdOrUrl, options = {}) {
   const args = [
     '--js-runtimes', 'node',
     '-f', 'bestaudio/best',
-    '-x',
-    '--audio-format', 'opus',
-    '--audio-quality', '0',
     '--no-playlist',
     '--no-warnings',
     '--no-cache-dir',
-    '--buffer-size', '16K',
-    '--http-chunk-size', '10M',
     '--extractor-args', `youtube:player_client=${playerClient}`,
-    '-o', '-',   // redireciona áudio para stdout (sem salvar em disco)
+    '--buffer-size', '256K',
+    '--socket-timeout', '30',
+    '--retries', '5',
+    '--fragment-retries', '5',
+    '--retry-sleep', 'fragment:1',
+    '-o', '-',   // redireciona áudio para stdout
     url
   ];
 

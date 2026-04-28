@@ -38,6 +38,8 @@ interface GuildState {
   autoDJ: boolean;
   nowPlayingMessage: Message | null;
   failedAttempts: Map<string | undefined, number>;
+  volume: number;
+  currentResource: any;
 }
 
 class QueueManager {
@@ -109,24 +111,28 @@ class QueueManager {
         const audioErr = err as any;
         const code = audioErr?.code || audioErr?.name || 'player_error';
         const msg = audioErr?.message || '';
-        // Se o stream fechar prematuramente, tentamos avançar para não travar a fila
-        if (code === 'ERR_STREAM_PREMATURE_CLOSE' || /premature/i.test(msg)) {
-          console.warn(`[PLAYER][${guildId}] aviso: fechamento prematuro detectado, avançando para próxima...`);
-          try {
-            this.next(guildId);
-          } catch (e) {
-            console.error(`[PLAYER][${guildId}] erro ao avançar após premature close:`, e.message);
+
+        // Broken pipe, EPIPE ou fechamento prematuro: avança para próxima música
+        const isPipeError = code === 'ERR_STREAM_PREMATURE_CLOSE'
+          || code === 'EPIPE'
+          || /premature/i.test(msg)
+          || /broken pipe/i.test(msg)
+          || /epipe/i.test(msg);
+
+        if (isPipeError) {
+          console.warn(`[PLAYER][${guildId}] broken pipe / fechamento prematuro, avançando para próxima...`);
+          // Matar processo yt-dlp órfão se houver
+          const g = this.guilds.get(guildId);
+          if (g?.currentStream) {
+            try { g.currentStream.kill('SIGKILL'); } catch { }
+            g.currentStream = null;
           }
+          // Avança para próxima
+          setImmediate(() => this.next(guildId));
           return;
         }
         // Erros críticos reais
         console.error(`[PLAYER][${guildId}] erro crítico:`, code, msg || err);
-        // Tenta avançar para a próxima faixa se estivermos com estado montado
-        try {
-          this.next(guildId);
-        } catch (e) {
-          console.error(`[PLAYER][${guildId}] falha ao avançar após erro:`, e.message);
-        }
       });
 
       this.guilds.set(guildId, {
@@ -142,7 +148,9 @@ class QueueManager {
         loop: false,
         autoDJ: false,
         nowPlayingMessage: null,
-        failedAttempts: new Map()
+        failedAttempts: new Map(),
+        volume: 1.0,
+        currentResource: null
       });
     }
     return this.guilds.get(guildId)!;
@@ -153,14 +161,40 @@ class QueueManager {
    */
   ensureConnection(guildId: string, voiceChannel: VoiceCh) {
     const g = this.get(guildId);
-    if (!g.connection) {
-      console.log(`[VOICE] ⚡ Conexão antecipada em ${guildId}`);
-      g.connection = joinVoiceChannel({
-        channelId: voiceChannel.id,
-        guildId,
-        adapterCreator: voiceChannel.guild.voiceAdapterCreator
-      });
-      g.connection.subscribe(g.player);
+    
+    // Verifica se a conexão existe e se não está em estado de erro/desconectada
+    const needsConnection = !g.connection || 
+                           g.connection.state.status === VoiceConnectionStatus.Disconnected ||
+                           g.connection.state.status === VoiceConnectionStatus.Destroyed;
+
+    if (needsConnection) {
+      console.log(`[VOICE] ⚡ Conectando/Reconectando em ${guildId}`);
+      try {
+        g.connection = joinVoiceChannel({
+          channelId: voiceChannel.id,
+          guildId,
+          adapterCreator: voiceChannel.guild.voiceAdapterCreator
+        });
+        g.connection.subscribe(g.player);
+
+        // Listener para limpeza automática em caso de desconexão inesperada
+        g.connection.on(VoiceConnectionStatus.Disconnected, async () => {
+          try {
+            // Tenta reconectar automaticamente se for um erro de rede temporário
+            await Promise.race([
+              entersState(g.connection!, VoiceConnectionStatus.Signalling, 5000),
+              entersState(g.connection!, VoiceConnectionStatus.Connecting, 5000),
+            ]);
+          } catch (e) {
+            console.warn(`[VOICE] Desconexão real detectada em ${guildId}, limpando objeto...`);
+            g.connection?.destroy();
+            g.connection = null;
+          }
+        });
+      } catch (err) {
+        console.error(`[VOICE] Erro ao tentar conectar em ${guildId}:`, err);
+        g.connection = null;
+      }
     }
     return g.connection;
   }
@@ -286,6 +320,15 @@ class QueueManager {
     const cleanTitleLog = decodeHtml(titleForLog);
     console.log(`[PLAYER] ${guildId} → tocando agora: ${cleanTitleLog}`);
 
+    // Garantir que não há processos órfãos do yt-dlp ANTES de iniciar o próximo
+    if (g.currentStream) {
+      try {
+        if (typeof g.currentStream.kill === 'function') g.currentStream.kill('SIGKILL');
+        else if (typeof g.currentStream.destroy === 'function') g.currentStream.destroy();
+      } catch { }
+      g.currentStream = null;
+    }
+
     let resource;
 
     // ─── Stream direto para fontes CDN (ex: Suno) ────────────────────────────
@@ -295,14 +338,10 @@ class QueueManager {
     if (isSunoSource && hasDirectStreamUrl) {
       try {
         console.log(`[PLAYBACK][${guildId}] src=direct-stream url=${song.streamUrl}`);
-        resource = createAudioResource(song.streamUrl, { inputType: StreamType.Arbitrary });
-        g.currentStream = null;
+        resource = createAudioResource(song.streamUrl, { inputType: StreamType.Arbitrary, inlineVolume: true });
       } catch (err) {
         console.error(`[PLAYBACK] Falha ao criar stream direto:`, err);
-        if (!g.failedAttempts) g.failedAttempts = new Map();
-        const attempts = g.failedAttempts.get(song.videoId) || 0;
-        g.failedAttempts.set(song.videoId, attempts + 1);
-        this.next(guildId);
+        this.next(guildId); // Pula se falhar
         return;
       }
 
@@ -315,10 +354,10 @@ class QueueManager {
         console.log(`[PLAYBACK][${guildId}] src=yt-dlp-stream target=${target}`);
         const { stream, process: ytProcess } = createYtDlpStream(target);
 
-        // Guardar referência ao processo para poder matar no skip
+        // Guardar referência ao processo para poder matar no skip ou erro
         g.currentStream = ytProcess;
 
-        resource = createAudioResource(stream, { inputType: StreamType.Arbitrary });
+        resource = createAudioResource(stream, { inputType: StreamType.Arbitrary, inlineVolume: true });
       } catch (err) {
         console.error(`[PLAYBACK] Falha ao criar yt-dlp stream:`, err);
         if (!g.failedAttempts) g.failedAttempts = new Map();
@@ -329,6 +368,11 @@ class QueueManager {
       }
     }
 
+    if (resource && resource.volume) {
+      resource.volume.setVolume(g.volume);
+    }
+    g.currentResource = resource;
+
     // Garantir conexão pronta antes de tocar (reduz silêncio inicial)
     try {
       if (g.connection) {
@@ -336,7 +380,7 @@ class QueueManager {
         await entersState(g.connection, VoiceConnectionStatus.Ready, 10000);
       }
     } catch (e) {
-      console.warn('[VOICE] conexão não ficou pronta em 10s; iniciando mesmo assim');
+      console.warn(`[VOICE][${guildId}] conexão não ficou pronta em 10s; tentando tocar mesmo assim`);
     }
 
     console.log(`[PLAYBACK][${guildId}] player.play(inputType=Arbitrary)`);
@@ -488,6 +532,14 @@ class QueueManager {
     return 'ready';
   }
 
+  setVolume(guildId: string, volume: number) {
+    const g = this.guilds.get(guildId);
+    if (!g) return;
+    g.volume = volume;
+    if (g.currentResource && g.currentResource.volume) {
+      g.currentResource.volume.setVolume(volume);
+    }
+  }
 
   pause(guildId: string) {
     const g = this.guilds.get(guildId);
@@ -519,7 +571,9 @@ class QueueManager {
       g.currentStream = null;
     }
 
-    this.next(guildId);
+    if (g.player) {
+      g.player.stop(true);
+    }
   }
 
   resetGuild(guildId: string, options: { preserveSelfFlag?: boolean } = {}) {
