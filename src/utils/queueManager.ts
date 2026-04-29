@@ -357,7 +357,7 @@ class QueueManager {
         // Guardar referência ao processo para poder matar no skip ou erro
         g.currentStream = ytProcess;
 
-        resource = createAudioResource(stream, { inputType: StreamType.Arbitrary, inlineVolume: true });
+        resource = createAudioResource(stream, { inputType: StreamType.Raw, inlineVolume: true });
       } catch (err) {
         console.error(`[PLAYBACK] Falha ao criar yt-dlp stream:`, err);
         if (!g.failedAttempts) g.failedAttempts = new Map();
@@ -383,7 +383,7 @@ class QueueManager {
       console.warn(`[VOICE][${guildId}] conexão não ficou pronta em 10s; tentando tocar mesmo assim`);
     }
 
-    console.log(`[PLAYBACK][${guildId}] player.play(inputType=Arbitrary)`);
+    console.log(`[PLAYBACK][${guildId}] player.play(inputType=Raw via ffmpeg)`);
     g.player.play(resource);
 
     // Evitar múltiplos listeners acumulados

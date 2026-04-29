@@ -7,6 +7,14 @@ const path = require('path');
 const localYtDlp = path.join(process.cwd(), process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp');
 const YT_DLP_BIN = fs.existsSync(localYtDlp) ? localYtDlp : 'yt-dlp';
 
+// ffmpeg-static fornece o binário do ffmpeg embutido
+let FFMPEG_BIN;
+try {
+  FFMPEG_BIN = require('ffmpeg-static');
+} catch {
+  FFMPEG_BIN = 'ffmpeg';
+}
+
 function runProcess(cmd, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { shell: false, ...options });
@@ -46,21 +54,22 @@ async function runYtDlpJson(args, options = {}) {
 }
 
 /**
- * Cria um stream de áudio do YouTube via yt-dlp sem salvar em disco.
- * O stdout do processo yt-dlp é retornado como um Readable stream
- * e pode ser passado diretamente para createAudioResource() do @discordjs/voice.
+ * Cria um stream de áudio do YouTube via yt-dlp → ffmpeg (PCM s16le).
+ * O ffmpeg converte o áudio para PCM raw (48kHz, stereo) que o @discordjs/voice
+ * consome com StreamType.Raw — sem precisar de encoder opus instalado.
  *
  * @param {string} videoIdOrUrl - ID do vídeo (ex: "dQw4w9WgXcQ") ou URL completa
  * @param {object} [options]
  * @param {string} [options.playerClient='android,ios'] - Player client do yt-dlp
- * @returns {{ stream: Readable, process: ChildProcess }}
+ * @returns {{ stream: Readable, process: { kill: Function } }}
  */
 function createYtDlpStream(videoIdOrUrl, options = {}) {
   const isUrl = /^https?:\/\//.test(videoIdOrUrl);
   const url = isUrl ? videoIdOrUrl : `https://www.youtube.com/watch?v=${videoIdOrUrl}`;
   const playerClient = options.playerClient || 'android,ios';
 
-  const args = [
+  // yt-dlp: baixa o melhor áudio e redireciona para stdout
+  const ytArgs = [
     '--js-runtimes', 'node',
     '-f', 'bestaudio/best',
     '--no-playlist',
@@ -72,37 +81,58 @@ function createYtDlpStream(videoIdOrUrl, options = {}) {
     '--retries', '5',
     '--fragment-retries', '5',
     '--retry-sleep', 'fragment:1',
-    '-o', '-',   // redireciona áudio para stdout
+    '-o', '-',
     url
   ];
 
-  const child = spawn(YT_DLP_BIN, args, { shell: false });
+  const ytProcess = spawn(YT_DLP_BIN, ytArgs, { shell: false });
 
-  // Evita crash por EPIPE se o yt-dlp fechar antes do bot
-  child.stdout.on('error', (err) => {
-    if (err.code === 'EPIPE') return;
-    console.error(`[YT-DLP STREAM] stdout error: ${err.message}`);
-  });
-  if (child.stdin) {
-    child.stdin.on('error', (err) => {
-      if (err.code === 'EPIPE') return;
-      console.error(`[YT-DLP STREAM] stdin error: ${err.message}`);
-    });
-  }
+  // ffmpeg: lê do stdin (yt-dlp), converte para PCM s16le 48kHz stereo
+  const ffmpegArgs = [
+    '-i', 'pipe:0',
+    '-analyzeduration', '0',
+    '-loglevel', 'error',
+    '-f', 's16le',
+    '-ar', '48000',
+    '-ac', '2',
+    'pipe:1'
+  ];
 
-  // Loga erros do yt-dlp sem crashar o processo
-  let stderrBuf = '';
-  child.stderr.on('data', d => {
-    stderrBuf += d.toString();
+  const ffmpegProcess = spawn(FFMPEG_BIN, ffmpegArgs, { shell: false });
+
+  // Conecta yt-dlp → ffmpeg
+  ytProcess.stdout.pipe(ffmpegProcess.stdin);
+
+  // Silencia erros de pipe para não crashar
+  ytProcess.stdout.on('error', (err) => {
+    if (err.code !== 'EPIPE') console.error(`[YT-DLP] stdout error: ${err.message}`);
   });
-  child.on('exit', (code) => {
+  ffmpegProcess.stdin.on('error', (err) => {
+    if (err.code !== 'EPIPE') console.error(`[FFMPEG] stdin error: ${err.message}`);
+  });
+  ffmpegProcess.stdout.on('error', (err) => {
+    if (err.code !== 'EPIPE') console.error(`[FFMPEG] stdout error: ${err.message}`);
+  });
+
+  // Loga erros sem crashar
+  let ytStderr = '';
+  ytProcess.stderr.on('data', d => { ytStderr += d.toString(); });
+  ytProcess.on('exit', (code) => {
     if (code !== 0 && code !== null) {
-      console.error(`[YT-DLP STREAM] process exited with code ${code} for ${videoIdOrUrl}: ${stderrBuf.slice(-300)}`);
+      console.error(`[YT-DLP] exited code ${code} for ${videoIdOrUrl}: ${ytStderr.slice(-200)}`);
     }
   });
+  ffmpegProcess.stderr.on('data', () => {}); // silencia ffmpeg stderr
 
-  return { stream: child.stdout, process: child };
+  // Objeto de controle que mata ambos os processos juntos
+  const controller = {
+    kill: (signal = 'SIGKILL') => {
+      try { ytProcess.kill(signal); } catch {}
+      try { ffmpegProcess.kill(signal); } catch {}
+    }
+  };
+
+  return { stream: ffmpegProcess.stdout, process: controller };
 }
 
 module.exports = { runYtDlp, runYtDlpJson, createYtDlpStream };
-
