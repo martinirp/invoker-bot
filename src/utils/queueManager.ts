@@ -102,7 +102,7 @@ class QueueManager {
       const player = createAudioPlayer({
         behaviors: {
           noSubscriber: NoSubscriberBehavior.Pause,
-          maxMissedFrames: 25
+          maxMissedFrames: 50 // Aumentado de 25 para 50 para lidar melhor com picos de CPU
         }
       });
 
@@ -338,7 +338,11 @@ class QueueManager {
     if (isSunoSource && hasDirectStreamUrl) {
       try {
         console.log(`[PLAYBACK][${guildId}] src=direct-stream url=${song.streamUrl}`);
-        resource = createAudioResource(song.streamUrl, { inputType: StreamType.Arbitrary, inlineVolume: true });
+        resource = createAudioResource(song.streamUrl, { 
+          inputType: StreamType.Arbitrary, 
+          inlineVolume: true,
+          silencePaddingFrames: 5 
+        });
       } catch (err) {
         console.error(`[PLAYBACK] Falha ao criar stream direto:`, err);
         this.next(guildId); // Pula se falhar
@@ -357,7 +361,11 @@ class QueueManager {
         // Guardar referência ao processo para poder matar no skip ou erro
         g.currentStream = ytProcess;
 
-        resource = createAudioResource(stream, { inputType: StreamType.Raw, inlineVolume: true });
+        resource = createAudioResource(stream, { 
+          inputType: StreamType.Raw, 
+          inlineVolume: true,
+          silencePaddingFrames: 5
+        });
       } catch (err) {
         console.error(`[PLAYBACK] Falha ao criar yt-dlp stream:`, err);
         if (!g.failedAttempts) g.failedAttempts = new Map();

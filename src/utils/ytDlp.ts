@@ -68,30 +68,32 @@ function createYtDlpStream(videoIdOrUrl, options = {}) {
   const url = isUrl ? videoIdOrUrl : `https://www.youtube.com/watch?v=${videoIdOrUrl}`;
   const playerClient = options.playerClient || 'android,ios';
 
-  // yt-dlp: baixa o melhor áudio e redireciona para stdout
+  // yt-dlp: preferência por opus em contêiner webm (mais leve para o YouTube)
   const ytArgs = [
     '--js-runtimes', 'node',
-    '-f', 'bestaudio/best',
+    '-f', 'ba[acodec=opus]/ba[ext=m4a]/best',
     '--no-playlist',
     '--no-warnings',
     '--no-cache-dir',
     '--extractor-args', `youtube:player_client=${playerClient}`,
-    '--buffer-size', '256K',
-    '--socket-timeout', '30',
-    '--retries', '5',
-    '--fragment-retries', '5',
-    '--retry-sleep', 'fragment:1',
+    '--buffer-size', '16K', // Buffer menor para reduzir latência inicial
+    '--socket-timeout', '20',
+    '--retries', '3',
     '-o', '-',
     url
   ];
 
   const ytProcess = spawn(YT_DLP_BIN, ytArgs, { shell: false });
 
-  // ffmpeg: lê do stdin (yt-dlp), converte para PCM s16le 48kHz stereo
+  // ffmpeg: otimizado para baixo uso de CPU
+  // s16le ainda é usado para permitir inlineVolume no discord.js
+  // mas aumentamos o buffering e limitamos threads para evitar picos
   const ffmpegArgs = [
     '-i', 'pipe:0',
     '-analyzeduration', '0',
+    '-probesize', '32k',
     '-loglevel', 'error',
+    '-threads', '1', // Limita a 1 thread para não roubar CPU do processo principal
     '-f', 's16le',
     '-ar', '48000',
     '-ac', '2',
@@ -100,7 +102,7 @@ function createYtDlpStream(videoIdOrUrl, options = {}) {
 
   const ffmpegProcess = spawn(FFMPEG_BIN, ffmpegArgs, { shell: false });
 
-  // Conecta yt-dlp → ffmpeg
+  // Pipe com tratamento de erro
   ytProcess.stdout.pipe(ffmpegProcess.stdin);
 
   // Silencia erros de pipe para não crashar
