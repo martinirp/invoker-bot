@@ -102,7 +102,7 @@ class QueueManager {
       const player = createAudioPlayer({
         behaviors: {
           noSubscriber: NoSubscriberBehavior.Pause,
-          maxMissedFrames: 50 // Aumentado de 25 para 50 para lidar melhor com picos de CPU
+          maxMissedFrames: 250 // Aumentado para 250 para lidar com picos maiores de CPU/Rede
         }
       });
 
@@ -341,7 +341,7 @@ class QueueManager {
         resource = createAudioResource(song.streamUrl, { 
           inputType: StreamType.Arbitrary, 
           inlineVolume: true,
-          silencePaddingFrames: 5 
+          silencePaddingFrames: 20 
         });
       } catch (err) {
         console.error(`[PLAYBACK] Falha ao criar stream direto:`, err);
@@ -364,7 +364,7 @@ class QueueManager {
         resource = createAudioResource(stream, { 
           inputType: StreamType.Raw, 
           inlineVolume: true,
-          silencePaddingFrames: 5
+          silencePaddingFrames: 20
         });
       } catch (err) {
         console.error(`[PLAYBACK] Falha ao criar yt-dlp stream:`, err);

@@ -76,9 +76,9 @@ function createYtDlpStream(videoIdOrUrl, options = {}) {
     '--no-warnings',
     '--no-cache-dir',
     '--extractor-args', `youtube:player_client=${playerClient}`,
-    '--buffer-size', '16K', // Buffer menor para reduzir latência inicial
-    '--socket-timeout', '20',
-    '--retries', '3',
+    '--buffer-size', '1M', // Aumentado de 16K para 1M para maior estabilidade
+    '--socket-timeout', '60', // Aumentado de 20 para 60 para evitar timeouts
+    '--retries', '5', // Aumentado de 3 para 5
     '-o', '-',
     url
   ];
@@ -91,12 +91,12 @@ function createYtDlpStream(videoIdOrUrl, options = {}) {
   const ffmpegArgs = [
     '-i', 'pipe:0',
     '-analyzeduration', '0',
-    '-probesize', '32k',
+    '-probesize', '128k', // Aumentado de 32k para 128k
     '-loglevel', 'error',
-    '-threads', '1', // Limita a 1 thread para não roubar CPU do processo principal
     '-f', 's16le',
     '-ar', '48000',
     '-ac', '2',
+    '-bufsize', '2048k', // Buffer do ffmpeg para suavizar a saída
     'pipe:1'
   ];
 
