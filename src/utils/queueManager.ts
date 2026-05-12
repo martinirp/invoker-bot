@@ -17,7 +17,8 @@ import type { Song } from '../types/music';
 
 // CommonJS-style imports
 const { createEmbed, createSongEmbed } = require('./embed');
-const { resolve, tokenize } = require('./resolver');
+const { resolve } = require('./resolver');
+const { tokenize } = require('./textUtils');
 const { createYtDlpStream } = require('./ytDlp');
 const { getVideoDetails } = require('./youtubeApi');
 
