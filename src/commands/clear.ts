@@ -4,7 +4,7 @@ const queueManager = require('../utils/queueManager');
 
 module.exports = {
   name: 'clear',
-  aliases: ['stop', 'leave', 'reset'],
+  aliases: ['stop', 'leave'],
   description: 'Para a música, limpa a fila e desconecta o bot do canal',
   usage: '#clear',
 

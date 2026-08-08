@@ -82,12 +82,6 @@ global.botInstance = true;
 // ===============================================
 require('dotenv').config();
 
-// Validar OPUS_BITRATE_K
-const opusBitrate = parseInt(process.env.OPUS_BITRATE_K || '96', 10);
-if (isNaN(opusBitrate) || opusBitrate < 16 || opusBitrate > 512) {
-  console.warn(`⚠️  OPUS_BITRATE_K inválido (${process.env.OPUS_BITRATE_K}), usando padrão 96kbps`);
-}
-
 if (process.env.DEBUG_MODE === 'true') {
   console.log('🐛 DEBUG_MODE ativado: logs verbosos habilitados');
 }
@@ -128,6 +122,7 @@ const { resolve } = require('./utils/resolver');
 const { ActionRowBuilder, ButtonBuilder, StringSelectMenuBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const { Worker } = require('worker_threads'); // Integration: Worker
 const { LootSplitter } = require('./utils/lootSplitter');
+const { saveQueues, restoreQueues } = require('./utils/persistence');
 
 // ===============================================
 // 💬 Último canal de texto por guild
@@ -192,6 +187,13 @@ console.log(`✅ Comandos carregados: ${client.commands.size}`);
 // ===============================================
 client.once(Events.ClientReady, c => {
   console.log(`✅ Bot online como ${c.user.tag}`);
+
+  // 🔄 Restaurar fila salva após 5s (garante reconexão de voz)
+  setTimeout(() => {
+    restoreQueues(queueManager, client).catch(e => {
+      console.error('[PERSIST] erro ao restaurar fila:', e.message);
+    });
+  }, 5000);
 });
 
 // ===============================================
@@ -1036,6 +1038,43 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
     console.error('[REACTION] erro ao processar reação:', e);
   }
 });
+
+// ===============================================
+// 📴 SHUTDOWN GRACIOSO
+// ===============================================
+function gracefulShutdown(signal) {
+  console.log(`\n📴 ${signal} recebido, salvando estado e encerrando streams...`);
+
+  // 💾 Salvar estado das filas
+  try {
+    saveQueues(queueManager);
+  } catch (e) {
+    console.error('[SHUTDOWN] erro ao salvar estado:', e.message);
+  }
+
+  // Matar todos os processos yt-dlp/ffmpeg ativos para evitar órfãos
+  try {
+    for (const [guildId, g] of queueManager.guilds.entries()) {
+      if (g?.currentStream) {
+        try {
+          if (typeof g.currentStream.kill === 'function') g.currentStream.kill('SIGKILL');
+          else if (typeof g.currentStream.destroy === 'function') g.currentStream.destroy();
+        } catch { }
+        g.currentStream = null;
+      }
+      try { g?.player?.stop(true); } catch { }
+      try { g?.connection?.destroy(); } catch { }
+    }
+  } catch { }
+
+  try { client.destroy(); } catch { }
+
+  // Pequena espera para liberar portas/conexões antes de sair
+  setTimeout(() => process.exit(0), 300);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // ===============================================
 // 🚀 LOGIN

@@ -150,7 +150,7 @@ class QueueManager {
         autoDJ: false,
         nowPlayingMessage: null,
         failedAttempts: new Map(),
-        volume: 1.0,
+        volume: parseFloat(process.env.DEFAULT_VOLUME || '1') || 1,
         currentResource: null
       });
     }
@@ -250,8 +250,6 @@ class QueueManager {
 
     // Conectar se necessário (adiantado ou fallback)
     this.ensureConnection(guildId, voiceChannel);
-
-    // Não interromper a música atual: se já estiver tocando, apenas mantém na frente da fila
 
     // Não interromper a música atual: se já estiver tocando, apenas mantém na frente da fila
     if (wasPlaying) {

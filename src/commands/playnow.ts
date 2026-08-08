@@ -5,14 +5,10 @@ const queueManager = require('../utils/queueManager');
 
 const {
   isYoutubeLink,
-  detectSourceType,
-  isPlaylist,
   resolveVideo,
-  resolvePlaylist,
   isSpotifyLink
 } = require('../utils/linkResolver');
 
-const { processPlaylistBatched } = require('../utils/playlistProcessor');
 const { resolveSpotifyTrack } = require('../utils/spotifyResolver');
 
 // Roles que podem usar o comando
@@ -135,15 +131,6 @@ async function execute(message) {
     }).catch(() => {});
   }
 }
-
-module.exports = {
-  name: 'playnow',
-  aliases: ['pn', 'pnow', 'next'],
-  description: 'Coloca uma música como próxima a tocar (requer privilégios)',
-  usage: '#playnow <nome ou link> | #pn <nome ou link> | %pn <nome ou link>',
-  permissions: ['ADMINISTRATOR'],
-  execute
-};
 
 module.exports = {
   name: 'playnow',

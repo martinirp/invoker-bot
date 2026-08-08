@@ -1,7 +1,6 @@
 // @ts-nocheck
 const { createEmbed } = require('../utils/embed');
 const queueManager = require('../utils/queueManager');
-const { getRelatedVideos } = require('../utils/youtubeApi');
 
 async function execute(message) {
   const guildId = message.guild.id;

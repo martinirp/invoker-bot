@@ -18,14 +18,26 @@ async function execute(message, args) {
     }).catch(() => {});
   }
 
-  const rawArg = (args[0] || '').trim().replace(/[^0-9.]/g, '');
-  const volume = Math.floor(parseFloat(rawArg));
+  const raw = (args[0] || '').trim().toLowerCase();
+  const isRelative = /^[+-]/.test(raw);
+  const parsed = Math.floor(parseFloat(raw.replace(/[^0-9.]/g, '')));
 
-  if (isNaN(volume) || volume < 1 || volume > 200) {
+  if (isNaN(parsed) || parsed <= 0) {
     return message.channel.send({
-      embeds: [createEmbed().setDescription('❌ Por favor, informe um número entre 1 e 200.')]
+      embeds: [createEmbed().setDescription('❌ Por favor, informe um número entre 1 e 200 (ou use +10 / -10).')]
     }).catch(() => {});
   }
+
+  // Relativo (+10 / -10)
+  let volume;
+  if (isRelative) {
+    const step = raw.startsWith('-') ? -parsed : parsed;
+    volume = Math.round(g.volume * 100) + step;
+  } else {
+    volume = parsed;
+  }
+
+  volume = Math.max(1, Math.min(200, volume));
 
   const volDecimal = volume / 100;
   queueManager.setVolume(guildId, volDecimal);

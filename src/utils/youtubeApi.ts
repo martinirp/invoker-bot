@@ -9,7 +9,6 @@ const LASTFM_API_KEY = process.env.LASTFM_API_KEY;
 // Simple circuit breaker to avoid spamming 403 errors
 let apiForbiddenUntil = 0; // epoch ms until which API calls are skipped
 let apiWarnedDuringBlock = false;
-// Piped disabled due to instability; prefer Last.FM-assisted yt-dlp fallback
 
 async function searchViaLastFM(query) {
   if (!LASTFM_API_KEY) return null;
@@ -152,7 +151,7 @@ async function getVideoDetailsYtDlp(videoId) {
  */
 async function getPlaylistItems(playlistId, maxResults = 100) {
   if (!YOUTUBE_API_KEY || Date.now() < apiForbiddenUntil) {
-    return await getPlaylistItemsPiped(playlistId, maxResults);
+    return await getPlaylistItemsYtDlp(playlistId, maxResults);
   }
 
   try {
@@ -214,32 +213,38 @@ async function getPlaylistItems(playlistId, maxResults = 100) {
     if (status === 403) {
       apiForbiddenUntil = Date.now() + 15 * 60 * 1000;
       apiWarnedDuringBlock = false;
-      console.warn('[YOUTUBE API] 403 ao buscar playlist → desativando API por 15 min; fallback Piped');
+      console.warn('[YOUTUBE API] 403 ao buscar playlist → desativando API por 15 min; fallback yt-dlp');
     } else {
       console.error('[YOUTUBE API] Erro ao buscar playlist:', error.message);
     }
-    // Fallback: Piped
-    try { return await getPlaylistItemsPiped(playlistId, maxResults); } catch { }
+    // Fallback: yt-dlp
+    try { return await getPlaylistItemsYtDlp(playlistId, maxResults); } catch { }
     return null;
   }
 }
 
-async function getPlaylistItemsPiped(playlistId, maxResults = 100) {
-  try {
-    const res = await axios.get(`${PIPED_BASE}/playlists/${playlistId}`, { timeout: 5000 });
-    const data = res.data || {};
-    const vids = Array.isArray(data.videos) ? data.videos.slice(0, maxResults) : [];
-    const videos = vids.map(v => ({
-      videoId: v.id,
-      title: v.title,
-      channel: v.uploader || v.uploaderName || '',
-      thumbnail: v.thumbnail || ''
-    }));
-    return { title: data.name || data.title || 'Playlist', videos };
-  } catch (err) {
-    console.error('[PIPED] Erro playlist:', err.message);
-    return null;
-  }
+/**
+ * Obtém os itens de uma playlist via yt-dlp (flat-playlist, sem download).
+ * Usado quando não há YOUTUBE_API_KEY ou a API está bloqueada (403).
+ */
+async function getPlaylistItemsYtDlp(playlistId, maxResults = 100) {
+  const url = `https://www.youtube.com/playlist?list=${playlistId}`;
+  const args = [
+    url,
+    '--flat-playlist',
+    '--skip-download',
+    '--no-playlist-download',
+    '--no-warnings',
+    '--no-cache-dir',
+    '--print', '%(id)s|||%(title)s|||%(channel)s|||%(thumbnail)s'
+  ];
+  const { stdout } = await runYtDlp(args);
+  const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
+  const videos = lines.slice(0, maxResults).map(l => {
+    const [id, title, channel, thumbnail] = l.split('|||');
+    return { videoId: id, title, channel: channel || '', thumbnail: thumbnail || '' };
+  }).filter(v => v.videoId);
+  return { title: 'Playlist', videos };
 }
 
 /**

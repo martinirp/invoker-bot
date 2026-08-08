@@ -3,7 +3,7 @@ const { createEmbed } = require('../utils/embed');
 
 module.exports = {
   name: 'queuelist',
-  aliases: ['ql', 'qlist', 'fila'],
+  aliases: ['ql', 'qlist'],
   inVoiceChannel: false,
 
   execute: async (message, client, args) => {
