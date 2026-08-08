@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { EmbedBuilder, PermissionsBitField } = require('discord.js');
+const { saveQueues } = require('../utils/persistence');
 
 module.exports = {
   name: 'reload',
@@ -39,6 +40,12 @@ module.exports = {
     try {
       // Suporte para reinício forçado via crash: `#reload force`
       if (Array.isArray(args) && args[0] && ['force', 'crash', 'restart'].includes(args[0].toLowerCase())) {
+        // 💾 Salvar filas antes de derrubar o processo
+        try {
+          const { saveQueues } = require('../utils/persistence');
+          saveQueues(require('../utils/queueManager'));
+        } catch {}
+
         await statusMsg.edit({
           embeds: [
             new EmbedBuilder()

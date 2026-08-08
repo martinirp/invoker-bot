@@ -152,7 +152,7 @@ async function getVideoDetailsYtDlp(videoId) {
  */
 async function getPlaylistItems(playlistId, maxResults = 100) {
   if (!YOUTUBE_API_KEY || Date.now() < apiForbiddenUntil) {
-    return await getPlaylistItemsPiped(playlistId, maxResults);
+    return await getPlaylistItemsYtDlp(playlistId, maxResults);
   }
 
   try {
@@ -214,30 +214,42 @@ async function getPlaylistItems(playlistId, maxResults = 100) {
     if (status === 403) {
       apiForbiddenUntil = Date.now() + 15 * 60 * 1000;
       apiWarnedDuringBlock = false;
-      console.warn('[YOUTUBE API] 403 ao buscar playlist → desativando API por 15 min; fallback Piped');
+      console.warn('[YOUTUBE API] 403 ao buscar playlist → desativando API por 15 min; fallback yt-dlp');
     } else {
       console.error('[YOUTUBE API] Erro ao buscar playlist:', error.message);
     }
-    // Fallback: Piped
-    try { return await getPlaylistItemsPiped(playlistId, maxResults); } catch { }
+    // Fallback: yt-dlp
+    try { return await getPlaylistItemsYtDlp(playlistId, maxResults); } catch { }
     return null;
   }
 }
 
-async function getPlaylistItemsPiped(playlistId, maxResults = 100) {
+async function getPlaylistItemsYtDlp(playlistId, maxResults = 100) {
   try {
-    const res = await axios.get(`${PIPED_BASE}/playlists/${playlistId}`, { timeout: 5000 });
-    const data = res.data || {};
-    const vids = Array.isArray(data.videos) ? data.videos.slice(0, maxResults) : [];
-    const videos = vids.map(v => ({
-      videoId: v.id,
-      title: v.title,
-      channel: v.uploader || v.uploaderName || '',
-      thumbnail: v.thumbnail || ''
-    }));
-    return { title: data.name || data.title || 'Playlist', videos };
+    const url = `https://www.youtube.com/playlist?list=${playlistId}`;
+    const args = [
+      '--flat-playlist',
+      '--no-warnings',
+      '--playlist-end', String(maxResults),
+      '--print', '%(id)s|||%(title)s|||%(uploader)s|||%(thumbnail)s',
+      url
+    ];
+    const { stdout } = await runYtDlp(args);
+    const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
+
+    const videos = lines.map(line => {
+      const [id, title, uploader, thumb] = line.split('|||');
+      return {
+        videoId: id,
+        title: title || 'Unknown',
+        channel: uploader || '',
+        thumbnail: thumb || ''
+      };
+    }).filter(v => v.videoId && v.videoId !== 'NA' && v.title && v.title !== 'Private video' && v.title !== 'Deleted video');
+
+    return { title: 'Playlist do YouTube', videos };
   } catch (err) {
-    console.error('[PIPED] Erro playlist:', err.message);
+    console.error('[YT-DLP] Erro playlist:', err.message);
     return null;
   }
 }

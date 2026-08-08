@@ -31,6 +31,7 @@ interface GuildState {
   queue: Song[];
   current: Song | null;
   currentStream: any;
+  currentResource: any;
   playing: boolean;
   connection: VoiceConnection | null;
   textChannel: SendableChannel;
@@ -40,6 +41,7 @@ interface GuildState {
   autoDJ: boolean;
   nowPlayingMessage: Message | null;
   failedAttempts: Map<string | undefined, number>;
+  volume: number;
 }
 
 class QueueManager {
@@ -131,6 +133,7 @@ class QueueManager {
         queue: [],
         current: null,
         currentStream: null,
+        currentResource: null,
         playing: false,
         connection: null,
         textChannel: null,
@@ -139,7 +142,8 @@ class QueueManager {
         loop: false,
         autoDJ: false,
         nowPlayingMessage: null,
-        failedAttempts: new Map()
+        failedAttempts: new Map(),
+        volume: parseFloat(process.env.DEFAULT_VOLUME || '1') || 1
       });
     }
     return this.guilds.get(guildId)!;
@@ -298,8 +302,17 @@ class QueueManager {
       }
 
       console.log(`[PLAYBACK][${guildId}] src=download file=${absPath}`);
-      resource = createAudioResource(absPath, { inputType: StreamType.OggOpus });
+      resource = createAudioResource(absPath, {
+        inputType: StreamType.OggOpus,
+        inlineVolume: true
+      });
       g.currentStream = null;
+      g.currentResource = resource;
+
+      // Aplica o volume da guild no recurso (inline volume transform)
+      if (resource.volume && typeof resource.volume.setVolume === 'function') {
+        try { resource.volume.setVolume(g.volume); } catch (e) { /* volume opcional */ }
+      }
     } catch (err) {
       console.error(`[PLAYBACK] Falha ao baixar ou tocar:`, err);
       if (!g.failedAttempts) g.failedAttempts = new Map();
@@ -326,6 +339,7 @@ class QueueManager {
 
     g.player.once(AudioPlayerStatus.Idle, () => {
       g.currentStream = null;
+      g.currentResource = null;
       g.nowPlayingMessage = null; // 🔥 FIX: Limpar referência para evitar memory leak
 
       // Limpar contador de falhas ao tocar com sucesso
@@ -483,6 +497,25 @@ class QueueManager {
     if (g.player.state.status === AudioPlayerStatus.Paused) {
       g.player.unpause();
     }
+  }
+
+  getVolume(guildId: string): number {
+    const g = this.guilds.get(guildId);
+    return g ? g.volume : 1;
+  }
+
+  setVolume(guildId: string, percent: number): number {
+    const g = this.get(guildId);
+
+    // Limita entre 0% e 200% (0 = mudo, 100 = normal, 200 = máximo suportado)
+    const clamped = Math.max(0, Math.min(200, Math.round(percent)));
+    g.volume = clamped / 100;
+
+    if (g.currentResource?.volume && typeof g.currentResource.volume.setVolume === 'function') {
+      try { g.currentResource.volume.setVolume(g.volume); } catch { }
+    }
+
+    return clamped;
   }
 
   skip(guildId: string) {

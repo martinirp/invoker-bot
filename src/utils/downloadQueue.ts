@@ -152,47 +152,67 @@ class DownloadQueue {
       try { fs.unlinkSync(tempFile); } catch {}
     }
 
-    // Executar yt-dlp de forma síncrona/promissificada
-    await downloadForDiscord(videoId, song.streamUrl, tempFile);
+    // Retry com backoff para falhas transitórias do yt-dlp
+    const maxRetries = Math.max(0, parseInt(process.env.DOWNLOAD_RETRIES || '2', 10));
+    let lastError: any = null;
 
-    // Validação de arquivo final
-    if (!fs.existsSync(tempFile)) {
-      throw new Error(`Arquivo não foi gerado pelo yt-dlp: ${tempFile}`);
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        // Executar yt-dlp de forma síncrona/promissificada
+        await downloadForDiscord(videoId, song.streamUrl, tempFile);
+
+        // Validação de arquivo final
+        if (!fs.existsSync(tempFile)) {
+          throw new Error(`Arquivo não foi gerado pelo yt-dlp: ${tempFile}`);
+        }
+
+        const stats = fs.statSync(tempFile);
+        if (stats.size === 0) {
+          throw new Error(`Arquivo gerado vazio: ${tempFile}`);
+        }
+
+        // Renomear pro arquivo final
+        fs.renameSync(tempFile, finalFile);
+
+        // DB updates
+        const keys = generateKeysFromTitle(title);
+        keys.add(videoId);
+
+        db.insertSong({
+          videoId,
+          title,
+          artist: null,
+          track: null,
+          file: finalFile,
+          streamUrl: song.streamUrl || null
+        });
+
+        for (const k of keys) {
+          db.insertKey(k, videoId);
+        }
+
+        // Metadados em background
+        updateMetadataAsync(videoId).catch((err: any) => {
+          console.error('[METADATA] Erro na atualização assíncrona:', err);
+        });
+
+        console.log(`[DOWNLOAD-DB] Concluído e salvo no banco: ${title}`);
+        return finalFile;
+      } catch (err) {
+        lastError = err;
+        // Limpar arquivo parcial antes de tentar de novo
+        if (fs.existsSync(tempFile)) {
+          try { fs.unlinkSync(tempFile); } catch {}
+        }
+        if (attempt < maxRetries) {
+          const delay = 1000 * Math.pow(2, attempt);
+          console.warn(`[DOWNLOAD] ${title} falhou (tentativa ${attempt + 1}/${maxRetries + 1}): ${err.message}. Tentando de novo em ${delay}ms`);
+          await new Promise(r => setTimeout(r, delay));
+        }
+      }
     }
 
-    const stats = fs.statSync(tempFile);
-    if (stats.size === 0) {
-      fs.unlinkSync(tempFile);
-      throw new Error(`Arquivo gerado vazio`);
-    }
-
-    // Renomear pro arquivo final
-    fs.renameSync(tempFile, finalFile);
-
-    // DB updates
-    const keys = generateKeysFromTitle(title);
-    keys.add(videoId);
-
-    db.insertSong({
-      videoId,
-      title,
-      artist: null,
-      track: null,
-      file: finalFile,
-      streamUrl: song.streamUrl || null
-    });
-
-    for (const k of keys) {
-      db.insertKey(k, videoId);
-    }
-
-    // Metadados em background
-    updateMetadataAsync(videoId).catch((err: any) => {
-      console.error('[METADATA] Erro na atualização assíncrona:', err);
-    });
-
-    console.log(`[DOWNLOAD-DB] Concluído e salvo no banco: ${title}`);
-    return finalFile;
+    throw lastError || new Error(`Falha no download de ${videoId}`);
   }
 
   private _tryNext() {

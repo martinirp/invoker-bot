@@ -132,6 +132,8 @@ const { Worker } = require('worker_threads'); // Integration: Worker
 const { removeSongCompletely } = require('./utils/removeSong');
 const { startCacheMonitor } = require('./utils/cacheMonitor');
 const { LootSplitter } = require('./utils/lootSplitter');
+const { saveQueues, restoreQueues } = require('./utils/persistence');
+const { logConfig } = require('./utils/config');
 
 // ===============================================
 // 💬 Último canal de texto por guild
@@ -171,6 +173,9 @@ if (!token) {
   process.exit(1);
 }
 
+// Validação da configuração
+logConfig();
+
 // ===============================================
 // 🧩 Comandos
 // ===============================================
@@ -200,6 +205,13 @@ client.once(Events.ClientReady, c => {
   try { startCacheMonitor(); } catch (e) {
     console.error('[CACHE MONITOR] erro ao iniciar:', e.message);
   }
+
+  // 🔄 Restaurar fila salva após 5s (garante reconexão de voz)
+  setTimeout(() => {
+    restoreQueues(queueManager, client).catch(e => {
+      console.error('[PERSIST] erro ao restaurar fila:', e.message);
+    });
+  }, 5000);
 });
 
 // ===============================================
@@ -1184,4 +1196,30 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
 // ===============================================
 // 🚀 LOGIN
 // ===============================================
+
+// ===============================================
+// 📴 SHUTDOWN GRACIOSO
+// ===============================================
+async function gracefulShutdown(signal) {
+  console.log(`\n📴 ${signal} recebido, salvando estado e encerrando...`);
+
+  try {
+    saveQueues(queueManager);
+  } catch (e) {
+    console.error('[SHUTDOWN] erro ao salvar estado:', e.message);
+  }
+
+  try {
+    for (const guildId of queueManager.selfDisconnecting) {
+      // não precisa: resetGuild cuida
+    }
+    client.destroy();
+  } catch { }
+
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
 client.login(token);

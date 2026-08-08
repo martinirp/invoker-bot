@@ -61,7 +61,7 @@ async function execute(message) {
 
 module.exports = {
   name: 'mix',
-  aliases: ['shuffle', 'embaralhar'],
+  aliases: ['m', 'radio'],
   description: 'Adiciona músicas aleatórias da biblioteca na fila',
   usage: '#mix <quantidade>',
   execute

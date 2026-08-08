@@ -2,19 +2,23 @@
 const { createEmbed } = require('../utils/embed');
 const db = require('../utils/db');
 
+const { formatBytes } = require('../utils/textUtils');
+
 async function execute(message) {
   try {
     const stats = db.getStats();
+    const bitrate = process.env.OPUS_BITRATE_K || '96';
 
     return message.channel.send({
       embeds: [
         createEmbed()
           .setTitle('📊 Estatísticas do Bot')
           .addFields(
-            { name: '🎵 Músicas em Cache', value: `${stats.totalSongs}` },
-            { name: '🔍 Chaves de Busca', value: `${stats.totalKeys}` },
-            { name: '💾 DB Otimizado', value: 'WAL + 64MB cache ✅' },
-            { name: '⚡ Bitrate Áudio', value: '96 kbps (otimizado)' }
+            { name: '🎵 Músicas em Cache', value: `${stats.totalSongs}`, inline: true },
+            { name: '🔍 Chaves de Busca', value: `${stats.totalKeys}`, inline: true },
+            { name: '💾 Banco de Dados', value: `${formatBytes(stats.dbSizeBytes)} (WAL ${formatBytes(stats.journalSizeBytes)})`, inline: false },
+            { name: '⚡ Bitrate Áudio', value: `${bitrate} kbps`, inline: true },
+            { name: '🌐 Uptime', value: formatUptime(process.uptime()), inline: true }
           )
       ]
     });
@@ -29,6 +33,15 @@ async function execute(message) {
   }
 }
 
+function formatUptime(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
 module.exports = {
   name: 'stats',
   aliases: ['estatísticas', 'info'],
@@ -36,4 +49,3 @@ module.exports = {
   usage: '#stats',
   execute
 };
-

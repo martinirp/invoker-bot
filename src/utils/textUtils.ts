@@ -20,8 +20,7 @@ function tokenize(text) {
         .filter(t => t.length >= 3);
 }
 
-function normalizeTitle(title) {
-    return title
+function normalizeTitle(title) {    return title
         .toLowerCase()
         .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
         .replace(/\([^)]*\)/g, '')
@@ -39,4 +38,11 @@ function normalizeTitle(title) {
         .trim();
 }
 
-module.exports = { normalize, tokenize, normalizeTitle };
+function formatBytes(bytes) {
+    if (!bytes || bytes <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
+}
+
+module.exports = { normalize, tokenize, normalizeTitle, formatBytes };

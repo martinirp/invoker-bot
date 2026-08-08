@@ -1,8 +1,6 @@
 // @ts-nocheck
 const { createEmbed } = require('../utils/embed');
 const queueManager = require('../utils/queueManager');
-const db = require('../utils/db');
-const { getRelatedVideos } = require('../utils/youtubeApi');
 
 async function execute(message) {
   const guildId = message.guild.id;
@@ -29,38 +27,19 @@ async function execute(message) {
   });
 
   try {
-    // Buscar 5 vídeos relacionados à música atual
-    const related = await getRelatedVideos(g.current.videoId, 5);
+    // Ativa o modo AutoDJ e adiciona recomendações via Last.FM (filtro de similaridade/dedupe)
+    g.autoDJ = true;
 
-    if (!related || related.length === 0) {
-      throw new Error('Não foi possível encontrar músicas relacionadas.');
-    }
+    const added = await queueManager.addAutoRecommendations(guildId, 5);
 
-    let added = 0;
-
-    for (const video of related) {
-      // Verificar se já está na fila
-      const alreadyInQueue = g.queue.some(s => s.videoId === video.videoId);
-      if (alreadyInQueue) continue;
-
-      // Adicionar à fila
-      const song = db.getByVideoId(video.videoId) || {
-        videoId: video.videoId,
-        title: video.title,
-        metadata: {
-          channel: video.channel,
-          thumbnail: video.thumbnail
-        }
-      };
-
-      await queueManager.play(
-        guildId,
-        g.voiceChannel,
-        song,
-        message.channel
-      );
-
-      added++;
+    if (added === 0) {
+      g.autoDJ = false;
+      return statusMsg.edit({
+        embeds: [
+          createEmbed().setDescription(`❌ Não foi possível encontrar músicas relacionadas a:\n**${g.current.title}**`)
+        ],
+        components: []
+      });
     }
 
     await statusMsg.edit({
@@ -78,6 +57,7 @@ async function execute(message) {
         }
       ]
     });
+
     // Coletor para o botão de skip
     const filter = i => i.customId === 'autodj_skip' && i.user.id === message.author.id;
     const collector = statusMsg.createMessageComponentCollector({ filter, time: 60000 });
@@ -85,27 +65,25 @@ async function execute(message) {
     collector.on('collect', async i => {
       if (i.deferred || i.replied) return;
       await i.deferUpdate();
-      // Executa o comando skip
       const skipCmd = require('./skip');
       await skipCmd.execute(message);
-      // Remove os botões após o uso
       await statusMsg.edit({ components: [] }).catch(() => {});
     });
   } catch (error) {
     console.error('[AUTODJ] Erro:', error);
+    g.autoDJ = false;
     await statusMsg.edit({
       embeds: [
         createEmbed().setDescription(`❌ Erro ao ativar Auto-DJ: ${error.message}`)
       ]
-    });
+    }).catch(() => {});
   }
 }
 
 module.exports = {
   name: 'autodj',
   aliases: ['dj', 'autoplay'],
-  description: 'Adiciona automaticamente 5 músicas relacionadas à música atual',
+  description: 'Ativa o AutoDJ e adiciona músicas relacionadas à música atual',
   usage: '#autodj',
   execute
 };
-

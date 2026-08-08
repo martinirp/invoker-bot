@@ -24,6 +24,7 @@ function updateSongMeta(videoId, meta) {
 // Observação: erros de variáveis não declaradas em outros arquivos (ex: updater.ts) indicam ausência no escopo local de uso, não necessariamente no projeto inteiro.
 const Database = require('better-sqlite3');
 const path = require('path');
+const fs = require('fs');
 
 const dbPath = process.env.MUSIC_DB_PATH || path.join(__dirname, 'music.db');
 const db = new Database(dbPath);
@@ -288,6 +289,31 @@ function searchSongsByKeywords(keywords) {
 }
 
 // =========================
+// 📊 ESTATÍSTICAS
+// =========================
+function getStats() {
+  const totalSongs = db.prepare('SELECT COUNT(*) AS c FROM songs').get().c;
+  const totalKeys = db.prepare('SELECT COUNT(*) AS c FROM search_keys').get().c;
+
+  let dbSizeBytes = 0;
+  let journalSizeBytes = 0;
+  try {
+    dbSizeBytes = fs.existsSync(dbPath) ? fs.statSync(dbPath).size : 0;
+    const journal = `${dbPath}-wal`;
+    journalSizeBytes = fs.existsSync(journal) ? fs.statSync(journal).size : 0;
+  } catch (e) {
+    // ignora erros de stat
+  }
+
+  return {
+    totalSongs,
+    totalKeys,
+    dbSizeBytes,
+    journalSizeBytes
+  };
+}
+
+// =========================
 // ❌ EXCLUSÃO COMPLETA
 // =========================
 function deleteSong(videoId) {
@@ -317,5 +343,6 @@ module.exports = {
   deleteSong,
   searchSongs,
   searchSongsByKeywords,
-  clearSearchKeys
+  clearSearchKeys,
+  getStats
 };
