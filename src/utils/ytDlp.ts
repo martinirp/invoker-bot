@@ -66,9 +66,9 @@ async function runYtDlpJson(args, options = {}) {
 function createYtDlpStream(videoIdOrUrl, options = {}) {
   const isUrl = /^https?:\/\//.test(videoIdOrUrl);
   const url = isUrl ? videoIdOrUrl : `https://www.youtube.com/watch?v=${videoIdOrUrl}`;
-  // web_safari costuma entregar URLs de mídia válidas sem exigir cookies.
-  // Pode ser substituído via YTDLP_PLAYER_CLIENT sem alterar código.
-  const playerClient = options.playerClient || process.env.YTDLP_PLAYER_CLIENT || 'web_safari';
+  // Sem override, o yt-dlp escolhe sozinho o melhor cliente (ex: visionos),
+  // que funciona sem cookies nem PO token. Forçar player_client quebrava isso.
+  const playerClient = options.playerClient || process.env.YTDLP_PLAYER_CLIENT || '';
 
   // yt-dlp: preferência por opus em contêiner webm (mais leve para o YouTube)
   const ytArgs = [
@@ -77,13 +77,16 @@ function createYtDlpStream(videoIdOrUrl, options = {}) {
     '--no-playlist',
     '--no-warnings',
     '--no-cache-dir',
-    '--extractor-args', `youtube:player_client=${playerClient}`,
     '--buffer-size', '64K', // Reduzido de 1M para 64K para melhorar tempo de resposta
     '--socket-timeout', '30', // Reduzido para 30s
     '--retries', '3', // Restaurado para 3
     '-o', '-',
     url
   ];
+
+  if (playerClient) {
+    ytArgs.push('--extractor-args', `youtube:player_client=${playerClient}`);
+  }
 
   const ytProcess = spawn(YT_DLP_BIN, ytArgs, { shell: false });
 
