@@ -60,13 +60,15 @@ async function runYtDlpJson(args, options = {}) {
  *
  * @param {string} videoIdOrUrl - ID do vídeo (ex: "dQw4w9WgXcQ") ou URL completa
  * @param {object} [options]
- * @param {string} [options.playerClient='android,ios'] - Player client do yt-dlp
+ * @param {string} [options.playerClient] - Player client do yt-dlp
  * @returns {{ stream: Readable, process: { kill: Function } }}
  */
 function createYtDlpStream(videoIdOrUrl, options = {}) {
   const isUrl = /^https?:\/\//.test(videoIdOrUrl);
   const url = isUrl ? videoIdOrUrl : `https://www.youtube.com/watch?v=${videoIdOrUrl}`;
-  const playerClient = options.playerClient || 'android,ios';
+  // android_vr é um cliente móvel do YouTube que normalmente não exige
+  // cookies. Pode ser substituído via YTDLP_PLAYER_CLIENT sem alterar código.
+  const playerClient = options.playerClient || process.env.YTDLP_PLAYER_CLIENT || 'android_vr';
 
   // yt-dlp: preferência por opus em contêiner webm (mais leve para o YouTube)
   const ytArgs = [
@@ -120,7 +122,7 @@ function createYtDlpStream(videoIdOrUrl, options = {}) {
   ytProcess.stderr.on('data', d => { ytStderr += d.toString(); });
   ytProcess.on('exit', (code) => {
     if (code !== 0 && code !== null) {
-      console.error(`[YT-DLP] exited code ${code} for ${videoIdOrUrl}: ${ytStderr.slice(-200)}`);
+       console.error(`[YT-DLP] exited code ${code} for ${videoIdOrUrl}: ${ytStderr.slice(-1000)}`);
     }
   });
   ffmpegProcess.stderr.on('data', () => {}); // silencia ffmpeg stderr

@@ -185,7 +185,7 @@ Mesma lógica de resolução do `play`, mas **insere a música como próxima na 
 
 ### Arquitetura de áudio (no-download)
 - **Sem cache local, sem banco de dados, sem download em disco**
-- YouTube: `yt-dlp -f 'ba[acodec=opus]/ba[ext=m4a]/best' -o -` com `player_client=android,ios` → `ffmpeg` (s16le 48kHz stereo) → `createAudioResource(stream, { inputType: StreamType.Raw, inlineVolume: true })`
+- YouTube: `yt-dlp -f 'ba[acodec=opus]/ba[ext=m4a]/best' -o -` com `player_client=android_vr` (cliente móvel, sem cookies por padrão) → `ffmpeg` (s16le 48kHz stereo) → `createAudioResource(stream, { inputType: StreamType.Raw, inlineVolume: true })`
 - Suno: stream direto da CDN (`streamUrl` `.mp3`) com `inputType: StreamType.Arbitrary`
 - Volume em tempo real via `resource.volume.setVolume()`
 
