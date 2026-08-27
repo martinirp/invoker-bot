@@ -359,6 +359,15 @@ class QueueManager {
         // Guardar referência ao processo para poder matar no skip ou erro
         g.currentStream = ytProcess;
 
+        // Se o YouTube recusar o download (403, idade ou autenticação), não
+        // deixe o player preso em autopaused: avance para a próxima faixa.
+        ytProcess.onExit?.((code) => {
+          if (code !== 0 && g.currentStream === ytProcess) {
+            g.currentStream = null;
+            try { g.player.stop(true); } catch { }
+          }
+        });
+
         resource = createAudioResource(stream, {
           inputType: StreamType.Raw,
           inlineVolume: true

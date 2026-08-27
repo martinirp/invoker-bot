@@ -33,14 +33,25 @@ async function ytSearchBasic(query, count = 1) {
       '--no-warnings',
       '--extractor-retries', '1',
       '--socket-timeout', '5',
-      '--print', '%(id)s|||%(title)s|||%(uploader)s|||%(thumbnail)s'
+       '--print', '%(id)s|||%(title)s|||%(uploader)s|||%(thumbnail)s|||%(age_limit)s'
     ];
     const { stdout } = await runYtDlp(args);
     const lines = stdout.trim().split(/\r?\n/).filter(Boolean);
     let results = lines.map(l => {
-      const [id, title, uploader, thumb] = l.split('|||');
-      return { videoId: id, title, channel: uploader || '', thumbnail: thumb || '', channelId: '' };
-    });
+       const [id, title, uploader, thumb, ageLimit] = l.split('|||');
+       return {
+         videoId: id,
+         title,
+         channel: uploader || '',
+         thumbnail: thumb || '',
+         channelId: '',
+         ageLimit: Number(ageLimit) || 0
+       };
+     });
+
+     // Vídeos com restrição de idade exigem autenticação e não podem ser
+     // reproduzidos anonimamente pelo bot. Mantemos alternativas da busca.
+     results = results.filter(video => video.ageLimit < 18);
 
     // Filtra covers não solicitados
     results = filterCovers(results, query);

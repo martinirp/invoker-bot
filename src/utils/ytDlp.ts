@@ -66,9 +66,9 @@ async function runYtDlpJson(args, options = {}) {
 function createYtDlpStream(videoIdOrUrl, options = {}) {
   const isUrl = /^https?:\/\//.test(videoIdOrUrl);
   const url = isUrl ? videoIdOrUrl : `https://www.youtube.com/watch?v=${videoIdOrUrl}`;
-  // android_vr é um cliente móvel do YouTube que normalmente não exige
-  // cookies. Pode ser substituído via YTDLP_PLAYER_CLIENT sem alterar código.
-  const playerClient = options.playerClient || process.env.YTDLP_PLAYER_CLIENT || 'android_vr';
+  // web_safari costuma entregar URLs de mídia válidas sem exigir cookies.
+  // Pode ser substituído via YTDLP_PLAYER_CLIENT sem alterar código.
+  const playerClient = options.playerClient || process.env.YTDLP_PLAYER_CLIENT || 'web_safari';
 
   // yt-dlp: preferência por opus em contêiner webm (mais leve para o YouTube)
   const ytArgs = [
@@ -132,7 +132,8 @@ function createYtDlpStream(videoIdOrUrl, options = {}) {
     kill: (signal = 'SIGKILL') => {
       try { ytProcess.kill(signal); } catch {}
       try { ffmpegProcess.kill(signal); } catch {}
-    }
+    },
+    onExit: (handler) => ytProcess.on('exit', handler)
   };
 
   return { stream: ffmpegProcess.stdout, process: controller };
