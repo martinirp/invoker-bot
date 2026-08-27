@@ -283,8 +283,8 @@ module.exports = {
 // Busca múltiplos resultados no YouTube (útil para recomendações de fallback)
 async function searchYouTubeMultiple(query, maxResults = 5) {
   if (!YOUTUBE_API_KEY || Date.now() < apiForbiddenUntil) {
-    const lf = await searchViaLastFM(query);
-    const res = await ytSearchBasic(lf || query, Math.max(1, maxResults));
+    // Last.fm não deve bloquear o caminho crítico do comando play.
+    const res = await ytSearchBasic(query, Math.max(1, maxResults));
     return res;
   }
 
@@ -328,8 +328,7 @@ async function searchYouTubeMultiple(query, maxResults = 5) {
     } catch (e) {
       console.error('[YOUTUBE API] Erro ao tratar erro em searchYouTubeMultiple:', e.message);
     }
-    const lf = await searchViaLastFM(query);
-    const res = await ytSearchBasic(lf || query, Math.max(1, maxResults));
+    const res = await ytSearchBasic(query, Math.max(1, maxResults));
     return res;
   }
 }

@@ -337,10 +337,9 @@ class QueueManager {
     if (isSunoSource && hasDirectStreamUrl) {
       try {
         console.log(`[PLAYBACK][${guildId}] src=direct-stream url=${song.streamUrl}`);
-        resource = createAudioResource(song.streamUrl, { 
-          inputType: StreamType.Arbitrary, 
-          inlineVolume: true,
-          silencePaddingFrames: 20 
+        resource = createAudioResource(song.streamUrl, {
+          inputType: StreamType.Arbitrary,
+          inlineVolume: true
         });
       } catch (err) {
         console.error(`[PLAYBACK] Falha ao criar stream direto:`, err);
@@ -360,10 +359,9 @@ class QueueManager {
         // Guardar referência ao processo para poder matar no skip ou erro
         g.currentStream = ytProcess;
 
-        resource = createAudioResource(stream, { 
-          inputType: StreamType.Raw, 
-          inlineVolume: true,
-          silencePaddingFrames: 20
+        resource = createAudioResource(stream, {
+          inputType: StreamType.Raw,
+          inlineVolume: true
         });
       } catch (err) {
         console.error(`[PLAYBACK] Falha ao criar yt-dlp stream:`, err);
@@ -380,16 +378,8 @@ class QueueManager {
     }
     g.currentResource = resource;
 
-    // Garantir conexão pronta antes de tocar (reduz silêncio inicial)
-    try {
-      if (g.connection) {
-        // Aumentado para 10s para redes mais lentas ou primeira conexão
-        await entersState(g.connection, VoiceConnectionStatus.Ready, 10000);
-      }
-    } catch (e) {
-      console.warn(`[VOICE][${guildId}] conexão não ficou pronta em 10s; tentando tocar mesmo assim`);
-    }
-
+    // O player pode ser iniciado enquanto a conexão termina o handshake;
+    // aguardar aqui adicionava até 10s ao primeiro play.
     console.log(`[PLAYBACK][${guildId}] player.play(inputType=Raw via ffmpeg)`);
     g.player.play(resource);
 

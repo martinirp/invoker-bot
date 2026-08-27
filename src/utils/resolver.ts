@@ -1,5 +1,5 @@
 // @ts-nocheck
-const { searchYouTubeMultiple, getVideoDetails } = require('./youtubeApi');
+const { searchYouTubeMultiple } = require('./youtubeApi');
 const { filterCovers } = require('./coverFilter');
 
 /**
@@ -40,8 +40,9 @@ async function resolve(query) {
 
   console.log(`[RESOLVER] 🔍 Buscando no YouTube: "${query}"`);
 
-  // 1. Buscar múltiplos resultados (top 5)
-  let results = await searchYouTubeMultiple(query, 5);
+  // O primeiro resultado já pode iniciar o áudio; detalhes ficam para o
+  // enriquecimento em background feito pelo QueueManager.
+  let results = await searchYouTubeMultiple(query, 3);
   
   if (!results || results.length === 0) {
     throw new Error(`Nenhum resultado encontrado para: ${query}`);
@@ -77,34 +78,9 @@ async function resolve(query) {
     return fastResult;
   }
 
-  // 3. Buscar detalhes (views) para todos os candidatos em paralelo (Caminho Normal)
-  const candidatesWithDetails = await Promise.all(
-    candidates.map(async (v) => {
-      try {
-        const details = await getVideoDetails(v.videoId);
-        return { ...v, ...details };
-      } catch {
-        return { ...v, views: 0 };
-      }
-    })
-  );
-
-  // 4. Sistema de pontuação (Reduce)
-  // Pesos: 70% Relevância de Título, 30% Visualizações (Log)
-  const best = candidatesWithDetails.reduce((prev, curr) => {
-    const prevRel = calculateRelevancy(prev.title, query);
-    const currRel = calculateRelevancy(curr.title, query);
-    
-    // View Score: Log10 das views (10k = 4, 1M = 6, 10M = 7...)
-    const prevViewScore = Math.log10(Math.max(1, prev.views || 0));
-    const currViewScore = Math.log10(Math.max(1, curr.views || 0));
-    
-    // Normalizar view score (considerando que raramente passa de 10 na escala log)
-    const prevScore = (prevRel * 0.7) + (Math.min(prevViewScore / 10, 1) * 0.3);
-    const currScore = (currRel * 0.7) + (Math.min(currViewScore / 10, 1) * 0.3);
-    
-    return currScore > prevScore ? curr : prev;
-  });
+  // Os resultados já vêm ordenados por relevância. Não esperar estatísticas
+  // de todos os candidatos reduz bastante a latência do primeiro play.
+  const best = candidates[0];
 
   const finalResult = {
     fromCache: false,
@@ -114,13 +90,13 @@ async function resolve(query) {
       channel: best.channel,
       thumbnail: best.thumbnail,
       duration: best.duration,
-      views: best.views,
+      views: best.views || 0,
       channelId: best.channelId,
       description: best.description
     }
   };
 
-  console.log(`[RESOLVER] ✅ Selecionado: "${finalResult.title}" [Score: Views=${finalResult.metadata.views}]`);
+  console.log(`[RESOLVER] ⚡ Selecionado para reprodução imediata: "${finalResult.title}"`);
 
   // Salvar no cache para uso futuro nesta sessão
   if (memoryCache.size > 500) memoryCache.clear(); // Limpeza básica se crescer demais
