@@ -22,6 +22,7 @@ const { tokenize } = require('./textUtils');
 const { createYtDlpStream } = require('./ytDlp');
 const { getVideoDetails } = require('./youtubeApi');
 
+
 type SendableChannel = { send: (...args: any[]) => any } | null;
 type VoiceCh = any; // Simplified; could be VoiceBasedChannel but keep loose to match runtime
 
@@ -459,9 +460,8 @@ class QueueManager {
         }
       }
 
-      // Buscar metadados ricos em background e atualizar embed assim que disponível
-      const needsMetadata = !song.metadata || !song.metadata.duration || !song.metadata.views;
-      if (needsMetadata && song.videoId) {
+      // Buscar metadados em background (não bloqueia playback)
+      if (song.videoId) {
         (async () => {
           try {
             const details = await getVideoDetails(song.videoId);
@@ -495,39 +495,33 @@ class QueueManager {
       try { g.textChannel?.send({ embeds: [createSongEmbed(baseSongData, 'playing', false, false)] }); } catch { }
     }
 
-    // Iniciar prefetch da próxima música para acelerar a transição
     this.prefetch(guildId);
   }
 
   /**
-   * Resolve antecipadamente a próxima música da fila em background
+   * Resolve antecipadamente a proxima musica da fila em background
    */
   async prefetch(guildId: string) {
     const g = this.get(guildId);
     if (g.queue.length === 0) return;
 
     const nextSong = g.queue[0];
-    
-    // Se já tem videoId e metadados básicos, não precisa prefetch (ou já foi feito)
-    if (nextSong.videoId && nextSong.metadata?.views) return;
+    if (nextSong.videoId) return;
 
-    console.log(`[PREFETCH][${guildId}] Adiantando resolução de: ${nextSong.title}`);
-    
+    console.log(`[PREFETCH][${guildId}] Adiantando resolucao de: ${nextSong.title}`);
+
     try {
       const res = await resolve(nextSong.title);
       if (res && res.videoId) {
-        // Atualizar objeto na fila sem removê-lo
         nextSong.videoId = res.videoId;
         nextSong.title = res.title;
         nextSong.metadata = { ...nextSong.metadata, ...res.metadata };
-        console.log(`[PREFETCH][${guildId}] ✅ Resolvido com sucesso: ${res.videoId}`);
+        console.log(`[PREFETCH][${guildId}] Resolvido: ${res.videoId}`);
       }
     } catch (e) {
-      console.warn(`[PREFETCH][${guildId}] ⚠️ Falha ao pre-resolver:`, e.message);
+      console.warn(`[PREFETCH][${guildId}] Falha ao pre-resolver:`, e.message);
     }
   }
-
-
 
   // 🔥 SAFE SKIP CHECK
   async ensureNextReady(guildId: string, timeoutMs: number = 10000): Promise<'ready' | 'timeout' | 'none'> {
