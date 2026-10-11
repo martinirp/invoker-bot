@@ -40,9 +40,9 @@ function runProcess(cmd, args, options = {}) {
 }
 
 async function runYtDlp(args, options = {}) {
-  // --no-js-runtimes limpa Deno (prioridade padrao) e forca apenas Node.js
+  // process.execPath = caminho exato do node que roda o bot (garante que yt-dlp acha o runtime)
   // sem isso, yt-dlp tenta Deno primeiro -- e falha silenciosamente em servidores sem Deno
-  const defaultArgs = ['--no-js-runtimes', '--js-runtimes', 'node'];
+  const defaultArgs = ['--no-js-runtimes', '--js-runtimes', `node:${process.execPath}`];
   try {
     return await runProcess(YT_DLP_BIN, [...defaultArgs, ...args], options);
   } catch (err) {
@@ -81,7 +81,7 @@ function createYtDlpStream(videoIdOrUrl, options = {}) {
 
   // yt-dlp: preferência por opus em contêiner webm (mais leve para o YouTube)
   const ytArgs = [
-    '--no-js-runtimes', '--js-runtimes', 'node', // forca so Node.js; sem --no-js-runtimes, Deno tem prioridade e falha em servidores sem Deno
+    '--no-js-runtimes', '--js-runtimes', `node:${process.execPath}`, // usa o mesmo node que roda o bot
     '-f', 'ba[acodec=opus]/ba[ext=m4a]/best',
     '--no-playlist',
     '--no-warnings',
