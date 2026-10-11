@@ -66,9 +66,16 @@ async function runYtDlpJson(args, options = {}) {
 function createYtDlpStream(videoIdOrUrl, options = {}) {
   const isUrl = /^https?:\/\//.test(videoIdOrUrl);
   const url = isUrl ? videoIdOrUrl : `https://www.youtube.com/watch?v=${videoIdOrUrl}`;
-  // Sem override, o yt-dlp escolhe sozinho o melhor cliente (ex: visionos),
-  // que funciona sem cookies nem PO token. Forçar player_client quebrava isso.
-  const playerClient = options.playerClient || process.env.YTDLP_PLAYER_CLIENT || '';
+  // Deixa o yt-dlp escolher automaticamente por padrão (evita clientes quebrados)
+  let playerClient = options.playerClient;
+  if (playerClient === undefined || playerClient === null) {
+    const envClient = process.env.YTDLP_PLAYER_CLIENT;
+    if (envClient && envClient.trim()) {
+      playerClient = envClient.trim();
+    } else {
+      playerClient = '';
+    }
+  }
 
   // yt-dlp: preferência por opus em contêiner webm (mais leve para o YouTube)
   const ytArgs = [
