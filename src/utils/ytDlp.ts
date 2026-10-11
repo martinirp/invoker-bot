@@ -68,14 +68,16 @@ async function runYtDlpJson(args, options = {}) {
 function createYtDlpStream(videoIdOrUrl, options = {}) {
   const isUrl = /^https?:\/\//.test(videoIdOrUrl);
   const url = isUrl ? videoIdOrUrl : `https://www.youtube.com/watch?v=${videoIdOrUrl}`;
-  // ios e mweb sao mais estaveis em IPs de servidor (android_vr causa 403)
+  // Usa android_music_app como padrão mais estável (evita "Sign in to confirm you're not a bot")
+  // Permite override: options.playerClient tem prioridade, depois YTDLP_PLAYER_CLIENT, depois padrão
   let playerClient = options.playerClient;
   if (playerClient === undefined || playerClient === null) {
     const envClient = process.env.YTDLP_PLAYER_CLIENT;
-    if (envClient && envClient.trim()) {
-      playerClient = envClient.trim();
+    if (envClient !== undefined) {
+      const trimmed = envClient.trim();
+      playerClient = trimmed; // string vazia = sem override
     } else {
-      playerClient = 'ios,mweb'; // fallback: evita 403 em servidores
+      playerClient = 'android_music_app';
     }
   }
 
