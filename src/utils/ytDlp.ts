@@ -68,14 +68,14 @@ async function runYtDlpJson(args, options = {}) {
 function createYtDlpStream(videoIdOrUrl, options = {}) {
   const isUrl = /^https?:\/\//.test(videoIdOrUrl);
   const url = isUrl ? videoIdOrUrl : `https://www.youtube.com/watch?v=${videoIdOrUrl}`;
-  // Deixa o yt-dlp escolher automaticamente por padrão (evita clientes quebrados)
+  // ios e mweb sao mais estaveis em IPs de servidor (android_vr causa 403)
   let playerClient = options.playerClient;
   if (playerClient === undefined || playerClient === null) {
     const envClient = process.env.YTDLP_PLAYER_CLIENT;
     if (envClient && envClient.trim()) {
       playerClient = envClient.trim();
     } else {
-      playerClient = '';
+      playerClient = 'ios,mweb'; // fallback: evita 403 em servidores
     }
   }
 
