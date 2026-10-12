@@ -68,8 +68,8 @@ async function runYtDlpJson(args, options = {}) {
 function createYtDlpStream(videoIdOrUrl, options = {}) {
   const isUrl = /^https?:\/\//.test(videoIdOrUrl);
   const url = isUrl ? videoIdOrUrl : `https://www.youtube.com/watch?v=${videoIdOrUrl}`;
-  // Usa 'android' como padrão mais estável (android_music_app deu 403 pra alguns vídeos)
-  // Permite override: options.playerClient tem prioridade, depois YTDLP_PLAYER_CLIENT, depois padrão
+  // Por padrão, NÃO força player_client - deixa yt-dlp escolher (mais estável p/ yt-dlp 2026.08.19)
+  // Permite override: options.playerClient tem prioridade, depois YTDLP_PLAYER_CLIENT
   let playerClient = options.playerClient;
   if (playerClient === undefined || playerClient === null) {
     const envClient = process.env.YTDLP_PLAYER_CLIENT;
@@ -77,7 +77,7 @@ function createYtDlpStream(videoIdOrUrl, options = {}) {
       const trimmed = envClient.trim();
       playerClient = trimmed; // string vazia = sem override
     } else {
-      playerClient = 'android';
+      playerClient = '';
     }
   }
 
@@ -98,6 +98,8 @@ function createYtDlpStream(videoIdOrUrl, options = {}) {
   if (playerClient) {
     ytArgs.push('--extractor-args', `youtube:player_client=${playerClient}`);
   }
+  // Alguns casos funcionam melhor sem forçar client específico (deixa yt-dlp escolher)
+  // Mantemos override quando explicitamente passado
 
   const ytProcess = spawn(YT_DLP_BIN, ytArgs, { shell: false });
 
