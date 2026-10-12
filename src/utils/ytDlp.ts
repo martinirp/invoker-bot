@@ -68,7 +68,7 @@ async function runYtDlpJson(args, options = {}) {
 function createYtDlpStream(videoIdOrUrl, options = {}) {
   const isUrl = /^https?:\/\//.test(videoIdOrUrl);
   const url = isUrl ? videoIdOrUrl : `https://www.youtube.com/watch?v=${videoIdOrUrl}`;
-  // Usa android_music_app como padrão mais estável (evita "Sign in to confirm you're not a bot")
+  // Usa 'android' como padrão mais estável (android_music_app deu 403 pra alguns vídeos)
   // Permite override: options.playerClient tem prioridade, depois YTDLP_PLAYER_CLIENT, depois padrão
   let playerClient = options.playerClient;
   if (playerClient === undefined || playerClient === null) {
@@ -77,7 +77,7 @@ function createYtDlpStream(videoIdOrUrl, options = {}) {
       const trimmed = envClient.trim();
       playerClient = trimmed; // string vazia = sem override
     } else {
-      playerClient = 'android_music_app';
+      playerClient = 'android';
     }
   }
 
