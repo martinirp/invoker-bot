@@ -68,7 +68,7 @@ async function runYtDlpJson(args, options = {}) {
 function createYtDlpStream(videoIdOrUrl, options = {}) {
   const isUrl = /^https?:\/\//.test(videoIdOrUrl);
   const url = isUrl ? videoIdOrUrl : `https://www.youtube.com/watch?v=${videoIdOrUrl}`;
-  // Usa 'android' como padrão (visionos/web com yt-dlp 2026.08.19 dá 403 em vários vídeos)
+  // Por padrão, não força player_client - deixa yt-dlp escolher (pode variar por vídeo)
   // Permite override: options.playerClient tem prioridade, depois YTDLP_PLAYER_CLIENT
   let playerClient = options.playerClient;
   if (playerClient === undefined || playerClient === null) {
@@ -77,7 +77,7 @@ function createYtDlpStream(videoIdOrUrl, options = {}) {
       const trimmed = envClient.trim();
       playerClient = trimmed; // string vazia = sem override
     } else {
-      playerClient = 'android';
+      playerClient = '';
     }
   }
 
