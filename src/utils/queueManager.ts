@@ -108,6 +108,10 @@ class QueueManager {
         }
       });
 
+      player.on('stateChange', (oldState, newState) => {
+        console.log(`[PLAYER STATE][${guildId}] ${oldState.status} -> ${newState.status}`);
+      });
+
       // Handler global para evitar crash em erros do player (ex.: ERR_STREAM_PREMATURE_CLOSE)
       player.on('error', (err) => {
         const audioErr = err as any;
@@ -178,6 +182,14 @@ class QueueManager {
           adapterCreator: voiceChannel.guild.voiceAdapterCreator
         });
         g.connection.subscribe(g.player);
+
+        g.connection.on('stateChange', (oldState, newState) => {
+          console.log(`[VOICE STATE][${guildId}] ${oldState.status} -> ${newState.status}`);
+        });
+
+        g.connection.on('error', (err) => {
+          console.error(`[VOICE ERROR][${guildId}]`, err);
+        });
 
         // Listener para limpeza automática em caso de desconexão inesperada
         g.connection.on(VoiceConnectionStatus.Disconnected, async () => {
@@ -390,6 +402,16 @@ class QueueManager {
 
     // O player pode ser iniciado enquanto a conexão termina o handshake;
     // aguardar aqui adicionava até 10s ao primeiro play.
+    // Aguardar conexão estar pronta antes de tocar
+    if (g.connection) {
+      try {
+        console.log(`[PLAYBACK][${guildId}] Aguardando VoiceConnectionStatus.Ready (estado atual: ${g.connection.state.status})...`);
+        await entersState(g.connection, VoiceConnectionStatus.Ready, 15000);
+        console.log(`[PLAYBACK][${guildId}] VoiceConnectionStatus.Ready confirmado!`);
+      } catch (err) {
+        console.warn(`[PLAYBACK][${guildId}] Não conseguiu entrar em Ready (estado atual: ${g.connection.state.status}):`, err.message);
+      }
+    }
     console.log(`[PLAYBACK][${guildId}] player.play(inputType=Raw via ffmpeg)`);
     g.player.play(resource);
 

@@ -39,15 +39,52 @@ function runProcess(cmd, args, options = {}) {
   });
 }
 
-async function runYtDlp(args, options = {}) {
-  // process.execPath = caminho exato do node que roda o bot (garante que yt-dlp acha o runtime)
-  // sem isso, yt-dlp tenta Deno primeiro -- e falha silenciosamente em servidores sem Deno
-  const defaultArgs = ['--no-js-runtimes', '--js-runtimes', `node:${process.execPath}`];
-  try {
-    return await runProcess(YT_DLP_BIN, [...defaultArgs, ...args], options);
-  } catch (err) {
-    throw err;
+function getCookieArgs() {
+  const customCookies = process.env.YTDLP_COOKIES;
+  if (customCookies && fs.existsSync(customCookies)) {
+    return ['--cookies', customCookies];
   }
+  const rootCookies = path.join(process.cwd(), 'cookies.txt');
+  if (fs.existsSync(rootCookies)) {
+    return ['--cookies', rootCookies];
+  }
+  return [];
+}
+
+function getExtractorArgs(playerClientOverride) {
+  const extractorArgs = [];
+
+  // Se playerClient for especificado explicitamente via options ou env, passa.
+  // Padrão vazio: deixa o yt-dlp escolher (funciona com o runtime JS Deno nativamente)
+  const client = (playerClientOverride !== undefined && playerClientOverride !== null)
+    ? String(playerClientOverride).trim()
+    : (process.env.YTDLP_PLAYER_CLIENT || '').trim();
+
+  if (client) {
+    extractorArgs.push(`player_client=${client}`);
+  }
+
+  const poToken = (process.env.YOUTUBE_PO_TOKEN || '').trim();
+  const visitorData = (process.env.YOUTUBE_VISITOR_DATA || '').trim();
+  if (poToken) {
+    extractorArgs.push(`po_token=web+${poToken}`);
+    if (visitorData) {
+      extractorArgs.push(`visitor_data=${visitorData}`);
+    }
+  }
+
+  if (extractorArgs.length > 0) {
+    return ['--extractor-args', `youtube:${extractorArgs.join(';')}`];
+  }
+  return [];
+}
+
+async function runYtDlp(args, options = {}) {
+  const commonArgs = [
+    ...getCookieArgs(),
+    ...getExtractorArgs(options.playerClient)
+  ];
+  return await runProcess(YT_DLP_BIN, [...commonArgs, ...args], options);
 }
 
 async function runYtDlpJson(args, options = {}) {
@@ -68,36 +105,21 @@ async function runYtDlpJson(args, options = {}) {
 function createYtDlpStream(videoIdOrUrl, options = {}) {
   const isUrl = /^https?:\/\//.test(videoIdOrUrl);
   const url = isUrl ? videoIdOrUrl : `https://www.youtube.com/watch?v=${videoIdOrUrl}`;
-  // Por padrão, não força player_client - deixa yt-dlp escolher (pode variar por vídeo)
-  // Permite override: options.playerClient tem prioridade, depois YTDLP_PLAYER_CLIENT
-  let playerClient = options.playerClient;
-  if (playerClient === undefined || playerClient === null) {
-    const envClient = process.env.YTDLP_PLAYER_CLIENT;
-    if (envClient !== undefined) {
-      const trimmed = envClient.trim();
-      playerClient = trimmed; // string vazia = sem override
-    } else {
-      playerClient = '';
-    }
-  }
 
   // yt-dlp: preferência por opus em contêiner webm (mais leve para o YouTube)
   const ytArgs = [
-    '--no-js-runtimes', '--js-runtimes', `node:${process.execPath}`, // usa o mesmo node que roda o bot
-    '-f', 'ba[acodec=opus]/ba[ext=m4a]/best',
+    ...getCookieArgs(),
+    ...getExtractorArgs(options.playerClient),
+    '-f', 'ba[acodec=opus]/ba[ext=m4a]/bestaudio/best',
     '--no-playlist',
     '--no-warnings',
     '--no-cache-dir',
-    '--buffer-size', '64K', // Reduzido de 1M para 64K para melhorar tempo de resposta
-    '--socket-timeout', '30', // Reduzido para 30s
-    '--retries', '3', // Restaurado para 3
+    '--buffer-size', '128K',
+    '--socket-timeout', '30',
+    '--retries', '3',
     '-o', '-',
     url
   ];
-
-  if (playerClient) {
-    ytArgs.push('--extractor-args', `youtube:player_client=${playerClient}`);
-  }
   // Alguns casos funcionam melhor sem forçar client específico (deixa yt-dlp escolher)
   // Mantemos override quando explicitamente passado
 
@@ -105,11 +127,10 @@ function createYtDlpStream(videoIdOrUrl, options = {}) {
 
   // ffmpeg: otimizado para baixo uso de CPU
   // s16le ainda é usado para permitir inlineVolume no discord.js
-  // mas aumentamos o buffering e limitamos threads para evitar picos
   const ffmpegArgs = [
     '-i', 'pipe:0',
     '-analyzeduration', '0',
-    '-probesize', '32k', // Restaurado para 32k para reduzir latência inicial
+    '-probesize', '32k',
     '-loglevel', 'error',
     '-f', 's16le',
     '-ar', '48000',
@@ -133,15 +154,30 @@ function createYtDlpStream(videoIdOrUrl, options = {}) {
     if (err.code !== 'EPIPE') console.error(`[FFMPEG] stdout error: ${err.message}`);
   });
 
+  ffmpegProcess.stdout.once('data', d => {
+    console.log(`[FFMPEG] Gerou primeiro chunk de áudio PCM (${d.length} bytes)`);
+  });
+
   // Loga erros sem crashar
   let ytStderr = '';
   ytProcess.stderr.on('data', d => { ytStderr += d.toString(); });
   ytProcess.on('exit', (code) => {
     if (code !== 0 && code !== null) {
        console.error(`[YT-DLP] exited code ${code} for ${videoIdOrUrl}: ${ytStderr.slice(-1000)}`);
+    } else {
+       console.log(`[YT-DLP] finalizou com sucesso (code 0) para ${videoIdOrUrl}`);
     }
   });
-  ffmpegProcess.stderr.on('data', () => {}); // silencia ffmpeg stderr
+
+  let ffmpegStderr = '';
+  ffmpegProcess.stderr.on('data', d => { ffmpegStderr += d.toString(); });
+  ffmpegProcess.on('exit', (code) => {
+    if (code !== 0 && code !== null) {
+      console.error(`[FFMPEG] exited code ${code}: ${ffmpegStderr.slice(-500)}`);
+    } else {
+      console.log(`[FFMPEG] finalizou com sucesso (code 0)`);
+    }
+  });
 
   // Objeto de controle que mata ambos os processos juntos
   const controller = {
@@ -155,4 +191,4 @@ function createYtDlpStream(videoIdOrUrl, options = {}) {
   return { stream: ffmpegProcess.stdout, process: controller };
 }
 
-module.exports = { runYtDlp, runYtDlpJson, createYtDlpStream };
+module.exports = { runYtDlp, runYtDlpJson, createYtDlpStream, YT_DLP_BIN, getCookieArgs, getExtractorArgs };

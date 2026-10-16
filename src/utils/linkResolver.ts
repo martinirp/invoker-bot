@@ -1,6 +1,7 @@
 // @ts-nocheck
 const { spawn } = require('child_process');
 const { getPlaylistItems } = require('./youtubeApi');
+const { YT_DLP_BIN, getCookieArgs, getExtractorArgs } = require('./ytDlp');
 
 function isYoutubeLink(input) {
   try {
@@ -107,11 +108,14 @@ function resolvePlaylist(url) {
 
 function resolvePlaylistYtDlp(url) {
   return new Promise((resolve, reject) => {
-    const yt = spawn('yt-dlp', [
+    const ytArgs = [
+      ...getCookieArgs(),
+      ...getExtractorArgs(),
       '--flat-playlist',
       '--dump-json',
       url
-    ]);
+    ];
+    const yt = spawn(YT_DLP_BIN, ytArgs);
 
     const videos = [];
     let buffer = '';
