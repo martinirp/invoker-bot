@@ -290,6 +290,22 @@ class QueueManager {
       g.current = null;
       g.playing = false;
 
+      // Se AutoDJ ligado, tenta adicionar recomendações antes de encerrar
+      if (g.autoDJ) {
+        try {
+          console.log('[AUTODJ][NEXT] Fila vazia com AutoDJ ativo, tentando refill...');
+          const added = await this.addAutoRecommendations(guildId, 2);
+          if (added > 0) {
+            console.log(`[AUTODJ][NEXT] Refill adicionou ${added} música(s), reiniciando playback...`);
+            g.playing = true;
+            return this.next(guildId);
+          }
+          console.log('[AUTODJ][NEXT] Refill não adicionou nada');
+        } catch (e) {
+          console.error('[AUTODJ][NEXT] Erro no refill:', e.message);
+        }
+      }
+
       g.textChannel?.send({
         embeds: [createEmbed().setDescription('Fila encerrada.')]
       }).catch(() => { });
@@ -737,8 +753,61 @@ class QueueManager {
       }
 
       if (recommendations.length === 0) {
-        console.log('[AUTODJ] Nenhuma recomendação encontrada no Last.FM');
-        return 0;
+        console.log('[AUTODJ] Nenhuma recomendação encontrada no Last.FM. Tentando fallbacks...');
+        const currentTitleClean = this._cleanTitle(currentTitle).toLowerCase();
+
+        // Fallback 1: Artist Mix pelo artista atual
+        const extractedArtist = await this._extractArtistTrack(g.current);
+        const artistNameForFallback = extractedArtist.artist;
+        if (artistNameForFallback) {
+          try {
+            console.log(`[AUTODJ][FALLBACK] Tentando Artist Mix de "${artistNameForFallback}"`);
+            const mix = await this._getArtistMixFromLastFM(artistNameForFallback, count * 5);
+            if (mix && mix.length > 0) {
+              recommendations = mix
+                .filter(t => this._cleanTitle(t).toLowerCase() !== currentTitleClean)
+                .slice(0, count * 3)
+                .map(t => ({ source: 'artistmix', title: t }));
+              console.log(`[AUTODJ][FALLBACK] Artist Mix retornou ${recommendations.length}`);
+            }
+          } catch (e) {
+            console.error('[AUTODJ][FALLBACK] Artist Mix falhou:', e.message);
+          }
+        }
+
+        // Fallback 2: Gemini
+        if (recommendations.length === 0 && process.env.GEMINI_API_KEY) {
+          try {
+            console.log('[AUTODJ][FALLBACK] Tentando Gemini...');
+            const gem = await this._getRecommendationsFromGemini(currentTitle, count * 2);
+            if (gem && gem.length > 0) {
+              recommendations = gem.map(t => ({ source: 'gemini', title: String(t) }));
+              console.log(`[AUTODJ][FALLBACK] Gemini retornou ${recommendations.length}`);
+            }
+          } catch (e) {
+            console.error('[AUTODJ][FALLBACK] Gemini falhou:', e.message);
+          }
+        }
+
+        // Fallback 3: YouTube search "similar"
+        if (recommendations.length === 0) {
+          try {
+            console.log('[AUTODJ][FALLBACK] Tentando busca no YouTube...');
+            const { searchYouTube } = require('./youtubeApi');
+            const yt = await searchYouTube(`${currentTitle} similar`);
+            if (yt && yt.title) {
+              recommendations = [{ source: 'youtube-search', title: yt.title }];
+              console.log('[AUTODJ][FALLBACK] YouTube search retornou 1');
+            }
+          } catch (e) {
+            console.error('[AUTODJ][FALLBACK] YouTube search falhou:', e.message);
+          }
+        }
+
+        if (recommendations.length === 0) {
+          console.log('[AUTODJ] Todos os fallbacks falharam. Não vai adicionar nada, mas AutoDJ continua ativo.');
+          return 0;
+        }
       }
 
       // Apply filters and deduplication
