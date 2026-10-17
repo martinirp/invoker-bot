@@ -1333,7 +1333,7 @@ Responda apenas com um array JavaScript no formato ["Artista - Música"], sem ex
       headers: { 'Content-Type': 'application/json' }
     };
 
-    return new Promise((resolve) => {
+    return new Promise<string[]>((resolve) => {
       const req = https.request(options, (res) => {
         let body = '';
         res.on('data', chunk => body += chunk);
@@ -1353,7 +1353,7 @@ Responda apenas com um array JavaScript no formato ["Artista - Música"], sem ex
               try {
                 const arr = JSON.parse(match[0]);
                 console.log(`[AUTODJ] Gemini retornou ${arr.length} recomendações`);
-                return resolve(arr);
+                return resolve(arr.map(String));
               } catch (e) {
                 console.error('[AUTODJ] Erro ao parsear JSON Gemini:', e.message);
                 return resolve([]);
