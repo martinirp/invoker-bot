@@ -40,9 +40,25 @@ function runProcess(cmd, args, options = {}) {
 }
 
 function getCookieArgs() {
+  if (process.env.YTDLP_COOKIES_FILE && require('fs').existsSync(process.env.YTDLP_COOKIES_FILE)) {
+    return ['--cookies', process.env.YTDLP_COOKIES_FILE];
+  }
+  if (process.env.YTDLP_COOKIES_FROM_BROWSER) {
+    return ['--cookies-from-browser', process.env.YTDLP_COOKIES_FROM_BROWSER];
+  }
   const customCookies = process.env.YTDLP_COOKIES;
-  if (customCookies && fs.existsSync(customCookies)) {
+  if (customCookies && require('fs').existsSync(customCookies)) {
     return ['--cookies', customCookies];
+  }
+  const rootCookies = require('path').join(process.cwd(), 'cookies.txt');
+  if (require('fs').existsSync(rootCookies)) {
+    return ['--cookies', rootCookies];
+  }
+  return [];
+}
+
+
+ (feat: play Instagram Reels audio, merge Suno into play, handle direct audio URLs)
   }
   const rootCookies = path.join(process.cwd(), 'cookies.txt');
   if (fs.existsSync(rootCookies)) {
@@ -108,9 +124,15 @@ function createYtDlpStream(videoIdOrUrl, options = {}) {
 
   // yt-dlp: preferência por opus em contêiner webm (mais leve para o YouTube)
   const ytArgs = [
+<<<<<<< HEAD
     ...getCookieArgs(),
     ...getExtractorArgs(options.playerClient),
     '-f', 'ba[acodec=opus]/ba[ext=m4a]/bestaudio/best',
+=======
+    '--js-runtimes', 'node',
+    ...getCookieArgs(),
+    '-f', 'ba[acodec=opus]/ba[ext=m4a]/best',
+>>>>>>> ad72a1d (feat: play Instagram Reels audio, merge Suno into play, handle direct audio URLs)
     '--no-playlist',
     '--no-warnings',
     '--no-cache-dir',

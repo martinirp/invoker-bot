@@ -6,7 +6,9 @@ export interface SongLike {
   videoId?: string;
   title?: string;
   channel?: string;
+  artist?: string;
   duration?: string;
+  originalUrl?: string;
 }
 
 export function createEmbed(): EmbedBuilder {
@@ -60,8 +62,9 @@ export function createSongEmbed(
   const cleanTitle = decodeHtml(song.title || '') || '';
   embed.setDescription(`**${cleanTitle}**`);
 
-  if (song.channel) {
-    embed.addFields({ name: '👤 Canal', value: decodeHtml(song.channel) || song.channel, inline: true });
+  const artistOrChannel = song.channel || song.artist;
+  if (artistOrChannel) {
+    embed.addFields({ name: '👤 Canal', value: decodeHtml(artistOrChannel) || artistOrChannel, inline: true });
   }
 
   if (song.duration) {
@@ -73,7 +76,9 @@ export function createSongEmbed(
     embed.addFields({ name: '🎧 Auto', value: autoDJ ? '✅ Ativado' : '❌ Desativado', inline: true });
   }
 
-  if (song.videoId) {
+  if (song.originalUrl) {
+    embed.setURL(song.originalUrl);
+  } else if (song.videoId) {
     embed.setURL(`https://www.youtube.com/watch?v=${song.videoId}`);
   }
 

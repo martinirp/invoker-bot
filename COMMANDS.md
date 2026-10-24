@@ -12,20 +12,23 @@
 Toca uma música. O fluxo varia conforme o input:
 
 ### Fluxo de detecção (em ordem de prioridade):
-1. **Link do Spotify (track)** → Resolve metadata da track (artista + título) → Busca no YouTube → Toca
-2. **Link do Spotify (playlist)** → Resolve todas as faixas → Toca a primeira imediatamente → Enfileira o restante em background
-3. **Link do YouTube (vídeo ou playlist):**
+1. **Link do Suno** (`suno.com/s/...` ou `suno.com/song/...`) → Extrai o áudio da CDN → Toca direto (sem download)
+2. **Link do Instagram Reel** (`instagram.com/reel/...`, `/p/`, `/tv/`) → Resolve o áudio do Reel via `yt-dlp` → Toca em streaming
+3. **Link do Spotify (track)** → Resolve metadata da track (artista + título) → Busca no YouTube → Toca
+4. **Link do Spotify (playlist)** → Resolve todas as faixas → Toca a primeira imediatamente → Enfileira o restante em background
+5. **Link do YouTube (vídeo ou playlist):**
    - Toca o vídeo **imediatamente**
    - Se a URL também contém uma playlist (`?list=PL...`), pergunta via botões se o usuário quer adicionar as restantes
    - ⚠️ **Mixes automáticos são ignorados** (`list=RD...`, `list=WL`, `list=LL`, `list=LM`, `start_radio=1`)
-4. **URL externa** (SoundCloud, Bandcamp, URL direta de áudio) → Resolve via `yt-dlp` → Toca
-5. **Busca de texto** → Usa o resolver interno → Toca o melhor resultado
+6. **URL externa** (SoundCloud, Bandcamp, URL direta de áudio) → Resolve via `yt-dlp` → Toca
+7. **Busca de texto** → Usa o resolver interno → Toca o melhor resultado
 
 ### Comportamento importante:
 - **Sem download em disco**: o áudio é transmitido em tempo real via `yt-dlp -o -` → `ffmpeg` → PCM (48kHz stereo) e tocado direto no Discord (StreamType.Raw)
 - `yt-dlp` usa player client `android,ios` para evitar throttling e restrições
 - O vídeo do YouTube é tocado com `--no-playlist` (só o vídeo, sem importar a playlist automaticamente)
 - A detecção de playlist é separada e explícita (via botões Sim/Não)
+- **Instagram**: se o Reel exigir login, configure `YTDLP_COOKIES_FROM_BROWSER` (ex.: `chrome`) ou `YTDLP_COOKIES_FILE` no `.env`
 
 ---
 
@@ -33,6 +36,8 @@ Toca uma música. O fluxo varia conforme o input:
 **Aliases:** `ps`
 **Uso:** `$ps <link-suno>`
 **Exemplo:** `$ps https://suno.com/s/qLR5ObPcP5CIx1W5`
+
+> ℹ️ O comando `play` também aceita links do Suno. Este comando foi mantido por compatibilidade.
 
 - Resolve o link do Suno (extrai `audio_url`/CDN do HTML SSR)
 - Toca o áudio direto da CDN do Suno (streaming, sem download)

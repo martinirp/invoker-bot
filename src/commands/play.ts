@@ -7,13 +7,17 @@ const {
   isYoutubeLink,
   detectSourceType,
   isPlaylist,
+  isDirectAudioUrl,
   resolveVideo,
   resolvePlaylist,
-  isSpotifyLink
+  isSpotifyLink,
+  isInstagramLink
 } = require('../utils/linkResolver');
 
 const { processPlaylistBatched } = require('../utils/playlistProcessor');
 const { resolveSpotifyTrack } = require('../utils/spotifyResolver');
+const { isSunoLink, resolveSunoTrack } = require('../utils/sunoResolver');
+const { resolveInstagramTrack } = require('../utils/instagramResolver');
 
 async function execute(message) {
   const guildId = message.guild.id;
@@ -42,6 +46,87 @@ async function execute(message) {
 
 
   try {
+    // =====================================================
+    // 🎼 SUNO LINK (antes era o comando $ps)
+    // =====================================================
+    if (isSunoLink(query)) {
+      console.log('[PLAY] Detectado link Suno, resolvendo metadata...');
+
+      const sunoData = await resolveSunoTrack(query);
+      if (!sunoData) {
+        throw new Error('Não foi possível resolver a música do Suno. O link pode estar inválido ou a música foi removida.');
+      }
+
+      console.log(`[PLAY][SUNO] ✅ "${sunoData.title}" por ${sunoData.artist}`);
+
+      const song = {
+        videoId: undefined,
+        title: sunoData.title,
+        streamUrl: sunoData.audioUrl || query,
+        metadata: {
+          source: 'suno',
+          artist: sunoData.artist,
+          image: sunoData.image,
+          sunoId: sunoData.sunoId,
+          originalUrl: query
+        }
+      };
+
+      const playPromise = queueManager.play(guildId, voiceChannel, song, textChannel);
+
+      statusMsg.edit({
+        embeds: [
+          createEmbed()
+            .setTitle('🎵 Suno')
+            .setDescription(`✅ **${sunoData.title}**\n👤 ${sunoData.artist}`)
+            .setFooter({ text: 'Suno.com' })
+            .setImage(sunoData.image)
+        ]
+      }).catch(() => { });
+
+      await playPromise;
+      return;
+    }
+
+    // =====================================================
+    // 📸 INSTAGRAM REEL (áudio do Reel)
+    // =====================================================
+    if (isInstagramLink(query)) {
+      console.log('[PLAY] Detectado link do Instagram, resolvendo áudio do Reel...');
+
+      const reel = await resolveInstagramTrack(query);
+      console.log(`[PLAY][INSTAGRAM] ✅ "${reel.title}" por ${reel.artist}`);
+
+      // O stream é feito pelo yt-dlp apontando para a URL do Reel
+      const song = {
+        videoId: undefined,
+        title: reel.title,
+        streamUrl: reel.streamUrl,
+        metadata: {
+          source: 'instagram',
+          artist: reel.artist,
+          image: reel.image,
+          duration: reel.duration,
+          originalUrl: reel.originalUrl
+        }
+      };
+
+      const playPromise = queueManager.play(guildId, voiceChannel, song, textChannel);
+
+      statusMsg.edit({
+        embeds: [
+          createEmbed()
+            .setTitle('📸 Instagram Reel')
+            .setDescription(`✅ **${reel.title}**\n👤 ${reel.artist}`)
+            .setFooter({ text: 'Instagram' })
+            .setImage(reel.image)
+        ]
+      }).catch(() => { });
+
+      await playPromise;
+      return;
+    }
+
     // =====================================================
     // 🎵 SPOTIFY LINK (track OR playlist)
     // =====================================================
@@ -186,6 +271,35 @@ async function execute(message) {
     }
 
     // =====================================================
+    // 🎧 URL DIRETA DE ÁUDIO (.mp3, .m4a, .ogg...)
+    // =====================================================
+    if (isDirectAudioUrl(query)) {
+      let fileName = 'Áudio';
+      try {
+        fileName = decodeURIComponent(query.split('/').pop() || fileName);
+      } catch { }
+
+      const song = {
+        videoId: undefined,
+        title: fileName,
+        streamUrl: query,
+        metadata: { source: 'direct', originalUrl: query }
+      };
+
+      const playPromise = queueManager.play(guildId, voiceChannel, song, textChannel);
+
+      statusMsg.edit({
+        embeds: [
+          createEmbed()
+            .setDescription(`Adicionado à fila: **${song.title}**`)
+        ]
+      }).catch(() => { });
+
+      await playPromise;
+      return;
+    }
+
+    // =====================================================
     // 🔍 SEARCH NORMAL
     // =====================================================
     const result = await resolve(query);
@@ -220,7 +334,7 @@ async function execute(message) {
 module.exports = {
   name: 'play',
   aliases: ['p'],
-  description: 'Toca uma música do YouTube, Spotify, SoundCloud ou URL direta',
+  description: 'Toca uma música do YouTube, Spotify, SoundCloud, Suno, Instagram Reels ou URL direta',
   usage: '#play <nome ou link>',
   execute
 };

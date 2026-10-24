@@ -40,6 +40,19 @@ function isSpotifyLink(input) {
   }
 }
 
+function isInstagramLink(input) {
+  if (!input || typeof input !== 'string') return false;
+  try {
+    const url = new URL(input);
+    if (!['instagram.com', 'www.instagram.com', 'm.instagram.com', 'instagr.am', 'www.instagr.am'].includes(url.hostname.toLowerCase())) {
+      return false;
+    }
+    return /\/(reel|reels|p|tv)\//i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
 function isDirectAudioUrl(input) {
   return /\.(mp3|ogg|m4a|wav|flac|aac|opus|webm)$/i.test(input);
 }
@@ -61,6 +74,7 @@ function detectSourceType(input) {
   if (isSoundCloudLink(input)) return 'soundcloud';
   if (isBandcampLink(input)) return 'bandcamp';
   if (isSpotifyLink(input)) return 'spotify';
+  if (isInstagramLink(input)) return 'instagram';
   if (isYoutubeLink(input)) return 'youtube';
   return 'search';
 }
@@ -151,6 +165,7 @@ module.exports = {
   isSoundCloudLink,
   isBandcampLink,
   isSpotifyLink,
+  isInstagramLink,
   isDirectAudioUrl,
   detectSourceType,
   isPlaylist,

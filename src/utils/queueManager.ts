@@ -544,7 +544,7 @@ class QueueManager {
     if (g.queue.length === 0) return;
 
     const nextSong = g.queue[0];
-    if (nextSong.videoId) return;
+    if (nextSong.videoId || nextSong.streamUrl) return;
 
     console.log(`[PREFETCH][${guildId}] Adiantando resolucao de: ${nextSong.title}`);
 
