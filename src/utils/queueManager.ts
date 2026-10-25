@@ -361,6 +361,8 @@ class QueueManager {
 
     // ─── Arquivo local de áudio (.ogg, .mp3, etc.) ─────────────────────────────
     const localFilePath = song.file || (song.streamUrl && !song.streamUrl.startsWith('http') ? song.streamUrl : null);
+    const isSunoSource = song.metadata?.source === 'suno';
+    const hasDirectStreamUrl = song.streamUrl && /^https?:\/\/.+\.(mp3|ogg|opus|wav|m4a)/i.test(song.streamUrl);
     const isLocalFile = localFilePath && fs.existsSync(localFilePath);
 
     if (isLocalFile) {
