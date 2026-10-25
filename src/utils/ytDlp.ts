@@ -57,16 +57,6 @@ function getCookieArgs() {
   return [];
 }
 
-
- (feat: play Instagram Reels audio, merge Suno into play, handle direct audio URLs)
-  }
-  const rootCookies = path.join(process.cwd(), 'cookies.txt');
-  if (fs.existsSync(rootCookies)) {
-    return ['--cookies', rootCookies];
-  }
-  return [];
-}
-
 function getExtractorArgs(playerClientOverride) {
   const extractorArgs = [];
 
@@ -124,15 +114,12 @@ function createYtDlpStream(videoIdOrUrl, options = {}) {
 
   // yt-dlp: preferência por opus em contêiner webm (mais leve para o YouTube)
   const ytArgs = [
-<<<<<<< HEAD
     ...getCookieArgs(),
     ...getExtractorArgs(options.playerClient),
     '-f', 'ba[acodec=opus]/ba[ext=m4a]/bestaudio/best',
-=======
     '--js-runtimes', 'node',
     ...getCookieArgs(),
     '-f', 'ba[acodec=opus]/ba[ext=m4a]/best',
->>>>>>> ad72a1d (feat: play Instagram Reels audio, merge Suno into play, handle direct audio URLs)
     '--no-playlist',
     '--no-warnings',
     '--no-cache-dir',
