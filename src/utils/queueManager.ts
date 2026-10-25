@@ -337,7 +337,7 @@ class QueueManager {
     g.current = song;
 
     // Se não há videoId nem streamUrl, não há como tocar
-    if (!song.videoId && !song.streamUrl) {
+    if (!song.videoId && !song.streamUrl && !song.file) {
       console.error(`[PLAYER] ${guildId} → música sem videoId/streamUrl, pulando`);
       this.next(guildId);
       return;
@@ -359,11 +359,22 @@ class QueueManager {
 
     let resource;
 
-    // ─── Stream direto para fontes CDN (ex: Suno) ────────────────────────────
-    const isSunoSource = song.metadata?.source === 'suno';
-    const hasDirectStreamUrl = song.streamUrl && /^https?:\/\/.+\.(mp3|ogg|opus|wav|m4a)/i.test(song.streamUrl);
+    // ─── Arquivo local de áudio (.ogg, .mp3, etc.) ─────────────────────────────
+    const localFilePath = song.file || (song.streamUrl && !song.streamUrl.startsWith('http') ? song.streamUrl : null);
+    const isLocalFile = localFilePath && fs.existsSync(localFilePath);
 
-    if (isSunoSource && hasDirectStreamUrl) {
+    if (isLocalFile) {
+      try {
+        console.log(`[PLAYBACK][${guildId}] src=local-file path=${localFilePath}`);
+        resource = createAudioResource(localFilePath, {
+          inlineVolume: true
+        });
+      } catch (err) {
+        console.error(`[PLAYBACK] Falha ao criar recurso de áudio local:`, err);
+        this.next(guildId);
+        return;
+      }
+    } else if (isSunoSource && hasDirectStreamUrl) {
       try {
         console.log(`[PLAYBACK][${guildId}] src=direct-stream url=${song.streamUrl}`);
         resource = createAudioResource(song.streamUrl, {
@@ -375,8 +386,6 @@ class QueueManager {
         this.next(guildId); // Pula se falhar
         return;
       }
-
-    // ─── Stream via yt-dlp (sem download em disco) ────────────────────────────
     } else {
       try {
         const target = song.streamUrl || song.videoId;
@@ -544,7 +553,7 @@ class QueueManager {
     if (g.queue.length === 0) return;
 
     const nextSong = g.queue[0];
-    if (nextSong.videoId || nextSong.streamUrl) return;
+    if (nextSong.videoId || nextSong.streamUrl || nextSong.file) return;
 
     console.log(`[PREFETCH][${guildId}] Adiantando resolucao de: ${nextSong.title}`);
 
